@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "lvgl/lvgl.h"
 
-//售货机商品的结构体类型
+//文件信息
 typedef struct 
 {
     char  pro_name[32];//商品名称

@@ -7,7 +7,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#include "pro_manage.h"
+#include "multimedia.h"
 
 
 #define DISP_BUF_SIZE (480 * 1024)
