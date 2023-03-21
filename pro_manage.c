@@ -1,450 +1,1446 @@
 #include <stdio.h>
 #include "lvgl/lvgl.h"
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <string.h>
+#include <stdlib.h>
+#include <pthread.h>
 
-//文件信息
-typedef struct 
-{
-    char  pro_name[32];//商品名称
-    float pro_price;//商品价格
-    int   pro_num;//商品数量
-    char  pro_pic[128];//存放商品的图片的路径
-    int   pro_id;//商品id
-}pro;
+#include <dirent.h>
+
+
 
 #define DATATYPE pro
-#include "list.h"
 
-lv_obj_t* p3 = NULL;
-lv_obj_t* p1 = NULL;//这是购买后第二次的界面
-lv_obj_t* p2 = NULL;//这是购买后第一次的界面
-
-
-
+//全局
+static lv_obj_t* t0;
+static lv_obj_t* t1;
+static lv_obj_t* t2;
+static lv_obj_t* t3;
 
 
-//遍历的回调函数
-void  traval_name(datatype arg)
+pthread_mutex_t mutex_lv;//lvgl线程锁
+
+static char local_music_path[]="/";//音乐路径
+static char local_pic_path[]="/";//图片路径
+static char local_words_path[]="/tmp/newwork/words";//歌词路径
+static char local_video_path[]="/evan_work";//视频路径
+static char music_path[100][1024];//音乐路径
+static char pic_path[100][1024];//图片路径
+static char words_path[100][1024];//歌词路径
+static char video_path[100][1024];//视频路径
+
+static char words_buf[5*1024]={0};//放歌词的数组
+static FILE *fp_mplayer=NULL;   //播放器传回的管道，接收播放进度
+static FILE *fp_words=NULL;     //歌词文件
+static int fd_mplayer = 0;      //定义管道文件描述符,发送指令给mplayer
+static int music_num=0;         //音乐数量
+static int music_index=-1;      //当前音乐的下标值，用于寻找上下首
+static int video_index=-1;      //当前视频的下标值，用于寻找上下首
+static int video_num=0;         //视频的数量
+static int percent_pos;         //当前播放百分比
+static float time_length;       //歌曲长度
+static float time_pos;          //当前播放进度
+static bool list_flag=1;    //开关列表
+static bool words_flag=1;    //歌词列表
+static bool play_flag=0;    //播放音乐开关
+static bool start=0;        //启动，线程读mplayer返回信息
+static lv_style_t font_style;   //中文
+static lv_obj_t *play_mode;     //下拉列表对象，播放模式
+static lv_obj_t *speed_obj;     //下拉列表对象，播放速度
+static lv_obj_t * music_list;   //音乐列表对象
+static lv_obj_t *pic_obj;       //图片对象
+static lv_obj_t * volume_slider;  //音量滑条对象
+static lv_obj_t * play_slider;  //播放进度条对象
+static lv_obj_t * cont;         //音乐盒的背景对象
+static lv_obj_t * video_list;   //视频列表对象
+static lv_obj_t *title_label;     //图片信息标签
+static lv_obj_t *words_label;     //歌词标签
+static lv_obj_t * volume_label; //音量标签
+static lv_obj_t *time_length_label; //时长标签
+static lv_obj_t *time_pos_label; //当前时间标签
+static lv_obj_t *words_list;     //歌词标签  
+pthread_cond_t cond;        //条件变量，用于暂停读取mplayer
+pthread_cond_t cond1;
+pthread_mutex_t mutex;
+pthread_mutex_t mutex1;
+
+pthread_t tid_read;         //读mplayer的线程id
+pthread_t tid_write;        //写mplayer的线程id
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//信号任务
+void signal_10_task(int arg)
+
 {
-    printf("%s\t",arg.pro_name);
-}
 
-//商品信息初始化
-//从本地获取当前商品信息，并记录在某条链表中
-static ListNode *Pro_InfoInit(void)
-{
-    ListNode *head = List_init();
+    if (arg == 10)
 
-    FILE *fp = fopen("./pro.txt","r+");
-    if(fp == NULL)
     {
-        perror("fopen");
+
+        printf("收到信号 %d 线程任务(读取mplayer)暂停\n", arg);
+
+        pthread_kill(tid_write,12); //停止写
+
+        pthread_cond_wait(&cond, &mutex);   //停止读
+
+        pthread_cond_signal(&cond1);//唤醒获取时间
+
+        puts("继续工作,读mplayer");
+
         return;
+
     }
 
-    //从文件中读取这些数据 并插入链表
-    datatype tmp;
-    while(1)
-    {
-        if(EOF == fscanf(fp,"%s %f %d %s %d",tmp.pro_name,&tmp.pro_price,&tmp.pro_num,tmp.pro_pic,&tmp.pro_id))
+}
+
+//信号任务
+void signal_12_task(int arg)
+
+{
+
+    //printf("收到信号 %d\n",arg);
+
+    printf("收到信号 %d 线程任务(get_time_pos)暂停\n", arg);
+
+    pthread_cond_wait(&cond1, &mutex1);
+
+    puts("继续工作,写mplayer");  
+
+    return;
+
+}
+static char words_line[1024]={0};
+
+
+//找歌词
+void *find_words_task(void *arg)
+
+{  
+
+    char *p=strstr(words_buf,(char *)arg);//寻找这个时间有没有歌词
+
+    if(p!=NULL)                 //和歌词相同时间
+
+    {            
+
+        char buf[1024]={0};
+
+        sscanf(p,"%s",buf);
+
+        char *q = strrchr(buf,']');
+
+        sscanf(++q,"%s",buf);  
+
+        if(strcmp(buf,words_line))//不相同
+
         {
-            break;
-        }
-        List_TailInsert(head,tmp);//尾插到链表
+
+            strcpy(words_line,buf);
+
+           
+
+            //puts(words_line);  
+
+            //**********歌词标签
+
+            //lv_label_set_text(words_label,words_line);
+
+           
+
+            pthread_mutex_lock(&mutex_lv);//上锁
+
+            lv_label_set_text(words_label,words_line);
+
+            pthread_mutex_unlock(&mutex_lv);
+
+        }    
+
     }
 
-    List_Traval(head,traval_name,0);   //按名字遍历
-    printf("\n");
-    fclose(fp);
-    return head;
 }
 
-// 处理滚动事件，完成页面循环切换(无限切换)--回调函数
-static void scroll_begin_event(lv_event_t * e)
+//线程任务 读播放器返回内容
+static char show_time_buf[100]={0};
+void *read_mplayer_task(void *arg)
+
 {
-    lv_obj_t * cont = lv_event_get_target(e);
-    lv_event_code_t code = lv_event_get_code(e);
 
-    lv_obj_t * ttt = lv_obj_get_parent(cont);
-
-    if(lv_event_get_code(e) == LV_EVENT_SCROLL_END) {
-        lv_tabview_t * tabview = (lv_tabview_t *)ttt;
-
-        lv_coord_t s = lv_obj_get_scroll_x(cont);
-
-        lv_point_t p;
-        lv_obj_get_scroll_end(cont, &p);
-
-        lv_coord_t w = lv_obj_get_content_width(cont);
-        lv_coord_t t;
-
-        if(lv_obj_get_style_base_dir(ttt, LV_PART_MAIN) == LV_BASE_DIR_RTL)  t = -(p.x - w / 2) / w;
-        else t = (p.x + w / 2) / w;
-
-        if(s < 0) t = tabview->tab_cnt - 1;
-        else if((t == (tabview->tab_cnt - 1)) && (s > p.x)) t = 0;
-
-        bool new_tab = false;
-        if(t != lv_tabview_get_tab_act(ttt)) new_tab = true;
-        lv_tabview_set_act(ttt, t, LV_ANIM_ON);
-    }
-}
-
-/*********************************************************************************************************/
-//按下第三层sold out
-void No_cb(lv_event_t *e){
-     lv_obj_del(p3);
-}
-
-//按下第二层结算&&退出按键
-void Paid_cb(lv_event_t *e){
-
-    printf("购买商品:%s\n",((ListNode *)(e->user_data))->data.pro_name);
-    printf("价格:%.1f\n",((ListNode *)(e->user_data))->data.pro_price);
-    printf("余量:%d\n",((ListNode *)(e->user_data))->data.pro_num);
-    printf("商品ID:%d\n",((ListNode *)(e->user_data))->data.pro_id);
-
-    ((ListNode *)(e->user_data))->data.pro_num--;
-
-        lv_obj_del(p1);//删除外面的pro1对象 
    
-    
-    
-}
 
-//按下结算按钮--调用回调函数
-void Pay_cb(lv_event_t *e){
-    int i = ((ListNode *)(e->user_data))->data.pro_num;
-    if(i <= 0){
+    //注册一个信号
 
-            lv_obj_del(p1);//删除外面的pro2对象
-            p3 = lv_obj_create(lv_scr_act());//创建一个新半透明的界面
-            lv_obj_set_size(p3,800,480);
-            lv_obj_set_style_bg_color(p3,lv_color_hex(0x00000000),LV_STATE_DEFAULT);
-            lv_obj_set_style_bg_opa(p3,50,LV_STATE_DEFAULT);
+    signal(10, signal_10_task);//收到10就暂停
 
-            lv_obj_t *no = lv_obj_create(p3);  //半透明界面里建一个新的界面
-            lv_obj_set_size(no,600,400);
-            lv_obj_align(no,LV_ALIGN_CENTER,0,0);
-            lv_obj_clear_flag(no,LV_OBJ_FLAG_SCROLLABLE);
+    char line[1024]={0};                //返回信息
 
-            lv_obj_t *no_img = lv_img_create(no);
-            //lv_img_set_zoom(pay_pic,380);
-            lv_img_set_src(no_img,"S:/pic/no.png");
-            lv_obj_align(no_img,LV_ALIGN_CENTER,0,0);
-            lv_obj_clear_flag(no_img,LV_OBJ_FLAG_SCROLLABLE);
+    char *p;
 
-                lv_obj_t *btn_nono = lv_btn_create(no_img);//第二个已付款按钮
-                lv_obj_set_size(btn_nono,130,60);
-                lv_obj_set_style_bg_color(btn_nono, lv_color_hex(0x00FFB6C1), LV_PART_MAIN);//颜色
-                lv_obj_set_style_radius(btn_nono, LV_PCT(20), LV_PART_MAIN);//圆弧
-                lv_obj_align(btn_nono,LV_ALIGN_BOTTOM_MID,0,-20);//下面
-                
-                // 创建一个 lv_label 对象，并将其添加到 pay 按钮中
-                lv_obj_t *nono_txt = lv_label_create(btn_nono);// 创建标签对象
-                lv_label_set_text(nono_txt, "Have a good day!");// 设置标签对象的文本内容
-                lv_obj_set_align(nono_txt,LV_ALIGN_CENTER); // 将标签对象居中对齐
-                lv_obj_add_event_cb(btn_nono,No_cb,LV_EVENT_CLICKED,(void *)((ListNode *)(e->user_data)));
+    while (1)
 
-        }
-    else{
-    lv_obj_del(p2);//删除外面的pro2对象
+    {
 
-    p1 = lv_obj_create(lv_scr_act());//创建一个新半透明的界面
-    lv_obj_set_size(p1,800,480);
-    lv_obj_set_style_bg_color(p1,lv_color_hex(0x00000000),LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(p1,50,LV_STATE_DEFAULT);
+        memset(line, 0, 1024);
 
-    lv_obj_t *paid = lv_obj_create(p1);  //半透明界面里建一个新的界面
-    lv_obj_set_size(paid,600,400);
-    lv_obj_align(paid,LV_ALIGN_CENTER,0,0);
-    lv_obj_clear_flag(paid,LV_OBJ_FLAG_SCROLLABLE);
+        fgets(line,1024,fp_mplayer);  //读取进程返回的内容
 
-    lv_obj_t *pay_img = lv_img_create(paid);
-    //lv_img_set_zoom(pay_pic,380);
-    lv_img_set_src(pay_img,"S:/pic/paid.png");
-    lv_obj_align(pay_img,LV_ALIGN_CENTER,0,0);
-    lv_obj_clear_flag(pay_img,LV_OBJ_FLAG_SCROLLABLE);
+        //printf("返回 %s",line);      
 
-        lv_obj_t *btn_gogo = lv_btn_create(pay_img);//第二个已付款按钮
-        lv_obj_set_size(btn_gogo,130,60);
-        lv_obj_set_style_bg_color(btn_gogo, lv_color_hex(0x00FFB6C1), LV_PART_MAIN);//颜色
-        lv_obj_set_style_radius(btn_gogo, LV_PCT(20), LV_PART_MAIN);//圆弧
-        lv_obj_align(btn_gogo,LV_ALIGN_BOTTOM_MID,0,-20);//下面
-        
-        // 创建一个 lv_label 对象，并将其添加到 pay 按钮中
-        lv_obj_t *gogo_txt = lv_label_create(btn_gogo);// 创建标签对象
-        lv_label_set_text(gogo_txt, "Have a good day!");// 设置标签对象的文本内容
-        lv_obj_set_align(gogo_txt,LV_ALIGN_CENTER); // 将标签对象居中对齐
-        lv_obj_add_event_cb(btn_gogo,Paid_cb,LV_EVENT_CLICKED,(void *)((ListNode *)(e->user_data)));
+        if(strstr(line,"ANS_TIME_POSITION"))//当前播放秒数
 
-        printf("购买商品:%s\n",((ListNode *)(e->user_data))->data.pro_name);
-        printf("价格:%.1f\n",((ListNode *)(e->user_data))->data.pro_price);
-        printf("余量:%d\n",((ListNode *)(e->user_data))->data.pro_num);
-        printf("商品ID:%d\n",((ListNode *)(e->user_data))->data.pro_id);
-    }
-        
-}
+        {
 
-//按下第一层退出按钮--调用回调函数
-void BTN_EXIT_cb(lv_event_t *e)
-{
-    //(lv_obj_t *)(e->user_data)
-    lv_obj_del(p2);//删除外面的pro1对象  
+            p=strrchr(line,'=');
 
-}
+            p++;    
 
-//按下了对应的商品图标--调用回调函数
-void Pro_Buy(lv_event_t *e)
-{
-    p2 = lv_obj_create(lv_scr_act());//NULL--无父对象 默认不显示 需要手动用函数加载  lv_scr_act()--当前活跃屏幕  默认显示
-    lv_obj_set_size(p2,800,480);
-    lv_obj_set_style_bg_color(p2,lv_color_hex(0x00000000),LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(p2,50,LV_STATE_DEFAULT);
+            sscanf(p,"%f",&time_pos);
 
-    //商品购物界面--在里面包好退出和结算
-    lv_obj_t *pro2 = lv_obj_create(p2);//NULL--无父对象 默认不显示 需要手动用函数加载  lv_scr_act()--当前活跃屏幕  默认显示
-    lv_obj_set_size(pro2,600,400);
-    lv_obj_set_align(pro2,LV_ALIGN_BOTTOM_MID);
+            printf("歌曲播放时间 %.2f\n",time_pos);
 
-    // //pay图片
-    lv_obj_t *pay_pic = lv_img_create(pro2);
-    lv_img_set_zoom(pay_pic,380);
-    lv_img_set_src(pay_pic,"S:/pic/pay.png");
-    lv_obj_align(pay_pic,LV_ALIGN_LEFT_MID,70,-20);//左中
+            char tmp[100]={0};
 
-    //显示信息的画布1
-    lv_obj_t *Board = lv_obj_create(pro2);
-    lv_obj_set_size(Board,140,100);
-    lv_obj_set_style_border_opa(Board,0,LV_STATE_DEFAULT);
-    lv_obj_align(Board,LV_ALIGN_RIGHT_MID,-30,45);
-    lv_obj_clear_flag(Board,LV_OBJ_FLAG_SCROLLABLE);
+            int tmp_time=time_pos;
 
+            sprintf(tmp,"%02d:%02d",tmp_time/60,tmp_time % 60);
 
-    //Have a great day!
-    lv_obj_t *greatday_txt = lv_label_create(pro2);// 创建标签对象
-    lv_label_set_text(greatday_txt, "Have a great day!!!I wish you to be rich!!!!!");// 设置标签对象的文本内容
-    lv_obj_set_align(greatday_txt,LV_ALIGN_TOP_MID); // 将标签对象居中对齐
-    //商品ID
-    lv_obj_t *id_txt = lv_label_create(Board);// 创建标签对象
-    lv_label_set_text_fmt(id_txt,"%d",((ListNode *)(e->user_data))->data.pro_id);// 设置标签对象的文本内容
-    lv_obj_align(id_txt,LV_ALIGN_LEFT_MID,0,-30); // 将标签对象右中
-    //购买商品 Purchase of goods
-    lv_obj_t *Purchase_txt = lv_label_create(Board);// 创建标签对象
-    lv_label_set_text(Purchase_txt, ((ListNode *)(e->user_data))->data.pro_name);// 设置标签对象的文本内容
-    lv_obj_align(Purchase_txt,LV_ALIGN_LEFT_MID,0,-10); // 将标签对象右中
-    //商品价格
-    lv_obj_t *price_txt = lv_label_create(Board);// 创建标签对象
-    lv_label_set_text_fmt(price_txt,"%.2f",((ListNode *)(e->user_data))->data.pro_price);// 设置标签对象的文本内容
-    lv_obj_align(price_txt,LV_ALIGN_LEFT_MID,0,10); // 将标签对象右中
-    //商品余量
-    lv_obj_t *num_txt = lv_label_create(Board);// 创建标签对象
-    lv_label_set_text_fmt(num_txt, "%d",((ListNode *)(e->user_data))->data.pro_num);// 设置标签对象的文本内容
-    lv_obj_align(num_txt,LV_ALIGN_LEFT_MID,0,30); // 将标签对象右中
+            if(strcmp(show_time_buf,tmp))//不相同
 
-
-
-    //显示信息的画布2!!!
-    lv_obj_t *Board2 = lv_obj_create(pro2);
-    lv_obj_set_size(Board2,130,100);
-    lv_obj_set_style_border_opa(Board2,0,LV_STATE_DEFAULT);
-    lv_obj_align(Board2,LV_ALIGN_RIGHT_MID,-160,45);
-    lv_obj_clear_flag(Board2,LV_OBJ_FLAG_SCROLLABLE);
-    //一些信息
-    lv_obj_t *inf1_txt = lv_label_create(Board2);// 创建标签对象
-    lv_label_set_text(inf1_txt, "Product ID:");// 设置标签对象的文本内容
-    lv_obj_align(inf1_txt,LV_ALIGN_LEFT_MID,0,-30); 
-
-    lv_obj_t *inf2_txt = lv_label_create(Board2);// 创建标签对象
-    lv_label_set_text(inf2_txt, "Product Name:");// 设置标签对象的文本内容
-    lv_obj_align(inf2_txt,LV_ALIGN_LEFT_MID,0,-10); 
-
-    lv_obj_t *inf3_txt = lv_label_create(Board2);// 创建标签对象
-    lv_label_set_text(inf3_txt, "Product Price:");// 设置标签对象的文本内容
-    lv_obj_align(inf3_txt,LV_ALIGN_LEFT_MID,0,10); 
-
-    lv_obj_t *inf4_txt = lv_label_create(Board2);// 创建标签对象
-    lv_label_set_text(inf4_txt, "Remain:");// 设置标签对象的文本内容
-    lv_obj_align(inf4_txt,LV_ALIGN_LEFT_MID,0,30);
-
-
-    //显示信息的画布3!!!
-    lv_obj_t *Board3 = lv_obj_create(pro2);
-    lv_obj_set_size(Board3,110,110);
-    lv_obj_set_style_border_opa(Board3,0,LV_STATE_DEFAULT);
-    lv_obj_align(Board3,LV_ALIGN_RIGHT_MID,-130,-65);
-    lv_obj_clear_flag(Board3,LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t * imgx = lv_img_create(Board3);
-    lv_img_set_src(imgx,((ListNode *)(e->user_data))->data.pro_pic);
-    lv_obj_set_align(imgx,LV_ALIGN_CENTER);  
-
-
-
-
-
-
-    //商品购物完毕界面--显示已结算图片
-
-        //在pro2下再搞2个按钮  一个退出  一个是结算
-        //退出界面
-        lv_obj_t *btn_exit = lv_imgbtn_create(pro2);
-        lv_imgbtn_set_src(btn_exit,_LV_IMGBTN_STATE_NUM,"S:/pic/close1.png",NULL,NULL);
-        lv_obj_set_size(btn_exit,50,50);//设置按钮对象大小
-        lv_obj_set_align(btn_exit,LV_ALIGN_TOP_RIGHT);//右上角
-        lv_obj_add_event_cb(btn_exit,BTN_EXIT_cb,LV_EVENT_CLICKED,(void *)((ListNode *)(e->user_data)));//传入pro1目的是为了在里面删除pro1整个对象
-        //lv_style_set_border_opa(btn_exit,LV_OPA_0);//透明度？？
-
-
-        //假如已结算--结算按钮
-        lv_obj_t *btn_pay = lv_btn_create(pro2);
-        lv_obj_set_size(btn_pay,130,60);
-        lv_obj_set_style_bg_color(btn_pay, lv_color_hex(0x00FFB6C1), LV_PART_MAIN);//颜色
-        lv_obj_set_style_radius(btn_pay, LV_PCT(20), LV_PART_MAIN);//圆弧
-        lv_obj_set_align(btn_pay,LV_ALIGN_BOTTOM_MID);//下面
-        // 创建一个 lv_label 对象，并将其添加到 pay 按钮中
-        lv_obj_t *pay_txt = lv_label_create(btn_pay);// 创建标签对象
-        lv_label_set_text(pay_txt, "Already paid");// 设置标签对象的文本内容
-        lv_obj_set_align(pay_txt,LV_ALIGN_CENTER); // 将标签对象居中对齐
-        lv_obj_add_event_cb(btn_pay,Pay_cb,LV_EVENT_CLICKED,(void *)((ListNode *)(e->user_data)));
-
-
-    printf("购买商品:%s\n",((ListNode *)(e->user_data))->data.pro_name);
-    printf("价格:%.1f\n",((ListNode *)(e->user_data))->data.pro_price);
-    printf("余量:%d\n",((ListNode *)(e->user_data))->data.pro_num);
-    printf("商品ID:%d\n",((ListNode *)(e->user_data))->data.pro_id);
-}
-
-//根据上面函数得到的商品信息链表绘制基本的商品浏览界面
-void Pro_BrowerCreate(void)
-{
-
-    //标签
-    static lv_obj_t* tv;
-    static lv_obj_t* t1;
-    static lv_obj_t* t2;
-    static lv_obj_t* t3;
-
-    tv = lv_tabview_create(lv_scr_act(), LV_DIR_BOTTOM, LV_DPI_DEF / 3);
-
-    t1 = lv_tabview_add_tab(tv, "drink");
-    t2 = lv_tabview_add_tab(tv, "Snacks");
-    t3 = lv_tabview_add_tab(tv, "Daily_necessities");
-
-
-
-    lv_obj_t* tab_btns = lv_tabview_get_tab_btns(tv);
-    lv_obj_set_style_border_color(tab_btns, lv_palette_main(LV_PALETTE_LIGHT_GREEN), LV_PART_ITEMS | LV_STATE_CHECKED);
-
-    lv_obj_add_event_cb(lv_tabview_get_content(tv), scroll_begin_event, LV_EVENT_SCROLL_END, NULL);
-
-    /*************************************************************************************************************************************/    
-
-        //lv_obj_t* cont = lv_obj_create(t1);               // 创建一个对象容器 cont
-        lv_obj_set_size(t1, 800, 420);                            // 设置对象容器大小
-        lv_obj_align(t1, LV_ALIGN_TOP_MID, 0, 5);                 // 设置对象容器基于屏幕中间对齐
-        lv_obj_set_style_pad_all(t1, 15, LV_PART_MAIN);           // 设置对象容器内部 item 与容器边的上下左右间距
-        lv_obj_set_style_pad_row(t1, 15, LV_PART_MAIN);           // 设置对象容器内部 item 之间的行间距
-        lv_obj_set_style_pad_column(t1, 15, LV_PART_MAIN);        // 设置对象容器内部 item 之间的列间距
-        lv_obj_clear_flag(t1, LV_OBJ_FLAG_SCROLL_ELASTIC);            // 取消滚动条
-        lv_obj_set_flex_flow(t1, LV_FLEX_FLOW_ROW_WRAP);          // 设置对象容器使用基于行的流失弹性布局flex，设置超出部分换行模式
-        /**
-         * 设置容器弹性模式
-         * 1. 容器指针
-         * 2. LV_FLEX_ALIGN_SPACE_EVENLY 均匀分部子元素之间的间距
-         * 3. LV_FLEX_ALIGN_END          容器中所有的子元素底部对齐
-         * 4. LV_FLEX_ALIGN_CENTER       容器中内容的子元素向容器顶部对齐
-        */
-        lv_obj_set_flex_align(t1, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_SPACE_EVENLY,0);
-
-        lv_obj_set_size(t2, 800, 420);                            // 设置对象容器大小
-        lv_obj_align(t2, LV_ALIGN_TOP_MID, 0, 5);                 // 设置对象容器基于屏幕中间对齐
-        lv_obj_set_style_pad_all(t2, 15, LV_PART_MAIN);           // 设置对象容器内部 item 与容器边的上下左右间距
-        lv_obj_set_style_pad_row(t2, 15, LV_PART_MAIN);           // 设置对象容器内部 item 之间的行间距
-        lv_obj_set_style_pad_column(t2, 15, LV_PART_MAIN);        // 设置对象容器内部 item 之间的列间距
-        lv_obj_clear_flag(t2, LV_OBJ_FLAG_SCROLL_ELASTIC);            // 取消滚动条
-        lv_obj_set_flex_flow(t2, LV_FLEX_FLOW_ROW_WRAP);          // 设置对象容器使用基于行的流失弹性布局flex，设置超出部分换行模式
-        lv_obj_set_flex_align(t2, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_SPACE_EVENLY,0);
-
-        lv_obj_set_size(t3, 800, 420);                            // 设置对象容器大小
-        lv_obj_align(t3, LV_ALIGN_TOP_MID, 0, 5);                 // 设置对象容器基于屏幕中间对齐
-        lv_obj_set_style_pad_all(t3, 15, LV_PART_MAIN);           // 设置对象容器内部 item 与容器边的上下左右间距
-        lv_obj_set_style_pad_row(t3, 15, LV_PART_MAIN);           // 设置对象容器内部 item 之间的行间距
-        lv_obj_set_style_pad_column(t3, 15, LV_PART_MAIN);        // 设置对象容器内部 item 之间的列间距
-        lv_obj_clear_flag(t3, LV_OBJ_FLAG_SCROLL_ELASTIC);            // 取消滚动条
-        lv_obj_set_flex_flow(t3, LV_FLEX_FLOW_ROW_WRAP);          // 设置对象容器使用基于行的流失弹性布局flex，设置超出部分换行模式
-        //lv_obj_set_flex_align(t3, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
-        lv_obj_set_flex_align(t3, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_SPACE_EVENLY,0);
-
-
-
-            ListNode *head = Pro_InfoInit();
-            ListNode *p=head->next;
-            for(int i=0;p!=head;p=p->next,i++)
             {
-                // p->data.pro_name 
-                // p->data.pro_price
-                if(p->data.pro_id<50){
-                lv_obj_t *pro1 = lv_obj_create(t1);//NULL--无父对象 默认不显示 需要手动用函数加载  lv_scr_act()--当前活跃屏幕  默认显示
-                lv_obj_set_size(pro1,110,190);
-                lv_obj_set_pos(pro1,i*100,0);
-                lv_obj_clear_flag(pro1,LV_OBJ_FLAG_SCROLLABLE);//清除可滚动--里面内容过多的情况下自动生成滚动条-这里是取消
-                //lv_obj_align(pro1,LV_ALIGN_TOP_LEFT,0,0);//边角有弧度 背景白色
-                //lv_obj_set_style_bg_color(pro1,lv_color_hex(0x00FF0000),LV_STATE_DEFAULT);//设置pro1对象默认状态下背景颜色为红色
-                lv_obj_add_event_cb(pro1,Pro_Buy,LV_EVENT_CLICKED,(void *)p);//设置短按调用回调函数Pro_Buy()
-                //创建一个显示商品名的标签
-                lv_obj_t *proname = lv_label_create(pro1);
-                lv_label_set_text(proname,p->data.pro_name);
-                lv_obj_set_align(proname,LV_ALIGN_TOP_MID);
-                //创建一个图像对象，将图像显示当前商品对象中间
-                lv_obj_t * img1 = lv_img_create(pro1);
-                lv_img_set_src(img1,p->data.pro_pic);
-                lv_obj_set_align(img1,LV_ALIGN_BOTTOM_MID);  //改到按键中间
-                }
-                else if((50<=p->data.pro_id) && (p->data.pro_id<99)){
-                    lv_obj_t *pro1 = lv_obj_create(t2);//NULL--无父对象 默认不显示 需要手动用函数加载  lv_scr_act()--当前活跃屏幕  默认显示
-                    lv_obj_set_size(pro1,110,190);
-                    lv_obj_set_pos(pro1,i*100,0);
-                    lv_obj_clear_flag(pro1,LV_OBJ_FLAG_SCROLLABLE);//清除可滚动--里面内容过多的情况下自动生成滚动条-这里是取消
-                    //lv_obj_align(pro1,LV_ALIGN_TOP_LEFT,0,0);//边角有弧度 背景白色
-                    //lv_obj_set_style_bg_color(pro1,lv_color_hex(0x00FF0000),LV_STATE_DEFAULT);//设置pro1对象默认状态下背景颜色为红色
-                    lv_obj_add_event_cb(pro1,Pro_Buy,LV_EVENT_SHORT_CLICKED,(void *)p);//设置短按调用回调函数Pro_Buy()
-                    //创建一个显示商品名的标签
-                    lv_obj_t *proname = lv_label_create(pro1);
-                    lv_label_set_text(proname,p->data.pro_name);
-                    lv_obj_set_align(proname,LV_ALIGN_TOP_MID);
-                    //创建一个图像对象，将图像显示当前商品对象中间
-                    lv_obj_t * img1 = lv_img_create(pro1);
-                    lv_img_set_src(img1,p->data.pro_pic);
-                    lv_obj_set_align(img1,LV_ALIGN_BOTTOM_MID);  //改到按键中间
-                }
-                else if(p->data.pro_id>=100){
-                    lv_obj_t *pro1 = lv_obj_create(t3);//NULL--无父对象 默认不显示 需要手动用函数加载  lv_scr_act()--当前活跃屏幕  默认显示
-                    lv_obj_set_size(pro1,110,190);
-                    lv_obj_set_pos(pro1,i*100,0);
-                    lv_obj_clear_flag(pro1,LV_OBJ_FLAG_SCROLLABLE);//清除可滚动--里面内容过多的情况下自动生成滚动条-这里是取消
-                    //lv_obj_align(pro1,LV_ALIGN_TOP_LEFT,0,0);//边角有弧度 背景白色
-                    //lv_obj_set_style_bg_color(pro1,lv_color_hex(0x00FF0000),LV_STATE_DEFAULT);//设置pro1对象默认状态下背景颜色为红色
-                    lv_obj_add_event_cb(pro1,Pro_Buy,LV_EVENT_SHORT_CLICKED,(void *)p);//设置短按调用回调函数Pro_Buy()
-                    //创建一个显示商品名的标签
-                    lv_obj_t *proname = lv_label_create(pro1);
-                    lv_label_set_text(proname,p->data.pro_name);
-                    lv_obj_set_align(proname,LV_ALIGN_TOP_MID);
-                    //创建一个图像对象，将图像显示当前商品对象中间
-                    lv_obj_t * img1 = lv_img_create(pro1);
-                    lv_img_set_src(img1,p->data.pro_pic);
-                    lv_obj_set_align(img1,LV_ALIGN_BOTTOM_MID);  //改到按键中间
-                }
+
+                strcpy(show_time_buf,tmp);
+
+                //lv_label_set_text(time_pos_label,show_time_buf); //设置标签
+
+                pthread_mutex_lock(&mutex_lv);//上锁
+
+                lv_label_set_text(time_pos_label,show_time_buf);
+
+                pthread_mutex_unlock(&mutex_lv);//解锁
 
             }
 
+            puts(tmp);//打印时间  00:00
+
+            //*********开启线程找歌词**********//
+
+            pthread_t tid;
+
+            pthread_create(&tid,NULL,find_words_task,tmp);
+
+            pthread_detach(tid);    
+
+            //*******************//
+
+        }
+
+        if(strstr(line,"ANS_PERCENT_POSITION"))//播放百分比
+
+        {
+
+             p=strrchr(line,'=');//p++;    
+
+            int percent=0;
+
+            sscanf(++p,"%d",&percent);
+
+            printf("播放百分比 %d\n",percent_pos);
+
+             if(percent!=percent_pos)
+
+            {
+
+            percent_pos=percent;
+
+            //lv_slider_set_value(play_slider,percent_pos,LV_ANIM_OFF);//设置进度条值
+
+            pthread_mutex_lock(&mutex_lv);//上锁
+
+            lv_slider_set_value(play_slider,percent_pos,LV_ANIM_OFF);
+
+            pthread_mutex_unlock(&mutex_lv);
+
+            }
+
+            if(percent_pos>=99)//播完了
+
+            {
+
+                lv_label_set_text(time_pos_label,"0:00");
+
+                //播放模式
+
+                int mod = lv_dropdown_get_selected(play_mode);
+
+                switch (mod)
+
+                    {
+
+                        case 0:{
+
+                                pthread_kill(tid_read,10);//停止读写mplayer
+
+                                break;
+
+                                }
+
+                        case 1://循环播放
+
+                                break;          
+
+                        case 2://列表循环
+
+                                {
+
+                                if(++music_index >= music_num)music_index=0;
+
+                                play_one_music();
+
+                                break;
+
+                                }
+
+                        case 3://随机播放
+
+                                {
+
+                                srand((unsigned)time(NULL));
+
+                                music_index = (music_index+rand())%music_num;
+
+                                play_one_music();
+
+                                break;
+
+                                }              
+
+                        default:
+
+                                break;
+
+                    }
+
+
+ 
+
+            }
+
+        }
+
+        if(strstr(line,"ANS_LENGTH"))//歌曲长度
+
+        {
+
+            p=strrchr(line,'=');p++;    
+
+            sscanf(p,"%f",&time_length);
+
+            printf("歌曲长度 %.2f\n",time_length);
+
+            char time_buf[100]={0};
+
+            int length=time_length;
+
+            sprintf(time_buf,"%02d:%02d",length/60,length % 60);
+
+            puts(time_buf);
+
+            pthread_mutex_lock(&mutex_lv);//上锁
+
+            lv_label_set_text(time_length_label,time_buf); //设置标签
+
+            pthread_mutex_unlock(&mutex_lv);//解锁
+
+       
+        }
+
+    }
+
+}
+
+//线程任务 发送命令给mplayer
+void *write_mplayer_task(void *arg)
+
+{
+
+    //注册一个信号
+
+    signal(12, signal_12_task);//收到12就暂停
+
+    char cmd1[1024]="get_time_pos\n";
+
+    char cmd[1024]="get_percent_pos\n";
+
+    while(1)
+
+    {
+
+        write(fd_mplayer,cmd1,strlen(cmd1));//发送获取时间命令
+
+        usleep(400*1000);
+
+        write(fd_mplayer,cmd,strlen(cmd));//发送获取百分比
+
+        usleep(400*1000);
+
+        //sleep(1);      
+
+    }
 
 }
 
 
 
 
+//线程任务 创建子进程播放视频
+void *play_video_task(void *arg)
+
+{
+
+    printf("---- %ld线程任务------------------\n",pthread_self());
+
+    //拼接命令
+
+    char cmd[1024]="mplayer -quiet -slave -zoom -x 670 -y 350 -geometry 60:0 -input file=/pipe";
+
+    sprintf(cmd,"%s %s",cmd,video_path[video_index]);
+
+    printf("命令：%s\n", cmd);
+
+   
+
+    fp_mplayer = popen(cmd, "r");
+
+    if (fp_mplayer == NULL)
+
+    perror("popen fail:");
+
+    puts("----线程任务(启动播放视频)完成 -----------------------\n");
+
+   
+
+    strcpy(cmd,"get_time_length\n");    //获取长度
+
+    write(fd_mplayer,cmd,strlen(cmd));
+
+    strcpy(cmd,"get_time_pos\n");    //发送获取时间命令
+
+    write(fd_mplayer,cmd,strlen(cmd));
+
+   
+
+    pthread_exit(NULL);//线程结束
+
+}
+
+//线程任务 创建子进程播放音乐
+void *play_music_task(void *arg)
+
+{    
+
+    printf("---- %ld线程任务------------------\n",pthread_self());
+
+    //拼接命令
+
+    char cmd[1024]="mplayer -slave -quiet -input file=/pipe";
+
+    sprintf(cmd,"%s %s",cmd,music_path[music_index]);
+
+   
+
+    //puts(cmd);  
+
+    //播放音乐
+
+    fp_mplayer = popen(cmd, "r");
+
+    if (fp_mplayer == NULL)perror("popen fail:");
+
+    puts("----线程任务(启动播放音乐)完成 -----------------------\n");
+
+    strcpy(cmd,"get_time_length\n");    //获取长度
+
+    write(fd_mplayer,cmd,strlen(cmd));
+
+    strcpy(cmd,"get_time_pos\n");    //发送获取时间命令
+
+    write(fd_mplayer,cmd,strlen(cmd));
+
+    pthread_exit(NULL);//线程结束
+
+}
 
 
+
+
+//播放一首音乐
+void play_one_music()
+
+{  
+
+    if(play_flag != 0)//看看有没有线程在使用播放器
+
+    {
+
+        system("killall -9 mplayer");
+
+    }
+
+    play_flag=1;
+
+    printf("音乐索引%d\n", music_index);
+
+    //开启线程播放音乐
+
+    pthread_t tid;
+
+    int pt = pthread_create(&tid, NULL, play_music_task, NULL);
+
+    if(pt != 0)
+
+    {
+
+        perror("创建进程失败");
+
+        return -1;
+
+       
+
+    }
+
+    pthread_detach(tid);//分离属性，自动回收
+
+    if(!start)
+
+    {
+
+        sleep(1);
+
+        //读取mplayer的内容
+
+        pthread_create(&tid_read, NULL, read_mplayer_task, NULL);//新建线程
+
+        pthread_detach(tid_read);//分离属性，自动回收
+
+        //发送获取时间命令
+
+        pthread_create(&tid_write, NULL, write_mplayer_task, NULL);
+
+        pthread_detach(tid_write);//分离属性，自动收回
+
+        printf("tid_read %ld  tid_write %ld\n",tid_read,tid_write);
+
+        start=1;
+
+    }
+
+    pthread_cond_signal(&cond);//唤醒线程读取mplayer返回的内容
+
+    //***************************************************************//
+
+    char tmp[100]={0};
+
+   
+
+    char *p = strrchr(music_path[music_index],'/');
+
+    strcpy(tmp,++p);
+
+   
+
+    lv_label_set_text(title_label,strtok(tmp,"."));
+
+    lv_label_set_text(words_label,strtok(tmp,"."));
+
+   
+
+    //显示音乐图片
+
+    lv_img_set_src(pic_obj,pic_path[music_index]);
+
+     //打开歌词文件
+
+    FILE *fp = fopen(words_path[music_index],"r");
+
+    memset(words_buf,0,sizeof(words_buf));
+
+    if(fp!=NULL)
+
+    {
+
+        fread(words_buf,5*1024,4,fp);
+
+    }
+
+    fclose(fp);
+
+    //设置播放属性
+
+    int ret = lv_dropdown_get_selected(speed_obj);
+
+    //音量
+
+    int volume=(int)lv_slider_get_value(volume_slider);
+
+    char cmd[1024]={0};
+
+    sprintf(cmd,"volume %d 1\n",volume);
+
+    write(fd_mplayer,cmd,strlen(cmd));
+
+    //修改播放速度
+
+    switch (ret)
+
+    {
+
+        case 0:{
+
+                char cmd[1024]={"speed_set 1\n"};
+
+                write(fd_mplayer,cmd,strlen(cmd));
+
+                break;
+
+                }
+
+        case 1:{      
+
+                char cmd[1024]={"speed_set 1.25\n"};
+
+                write(fd_mplayer,cmd,strlen(cmd));  
+
+                break;    
+
+                }
+
+        case 2:{      
+
+                char cmd[1024]={"speed_set 1.5\n"};
+
+                write(fd_mplayer,cmd,strlen(cmd));
+
+                break;
+
+                }
+
+        case 3:{      
+
+                char cmd[1024]={"speed_set 2\n"};        
+
+                write(fd_mplayer,cmd,strlen(cmd));        
+
+                break;
+
+        }          
+
+        default:        
+
+                break;
+
+    }
+
+    //播放模式
+
+    int mod = lv_dropdown_get_selected(play_mode);
+
+    switch (mod)
+
+    {
+
+        case 0:{
+
+                char cmd[1024]={"loop -1\n"};
+
+                write(fd_mplayer,cmd,strlen(cmd));
+
+                break;
+
+                }
+
+        case 1:{
+
+                char cmd[1024]={"loop -1\n"};
+
+                write(fd_mplayer,cmd,strlen(cmd));
+
+                strcpy(cmd,"loop 1\n");write(fd_mplayer,cmd,strlen(cmd));        
+
+                break;
+
+                }
+
+        case 2://列表循环
+
+                {        
+
+                break;    
+
+                }
+
+        case 3://随机播放
+
+                {      
+
+                break;
+
+                }          
+
+        default:        
+
+                break;
+
+    }
+
+
+
+ 
+
+}
+
+//播放一个视频
+void play_one_video()
+
+{  
+
+    if(play_flag != 0)//看看有没有线程在使用播放器
+
+    {
+
+        system("killall -9 mplayer");
+
+    }
+
+    play_flag=1;
+
+    printf("视频索引%d\n", video_index);
+
+    //打开线程播放视频
+
+    pthread_t tid;
+
+    int pt = pthread_create(&tid, NULL, play_video_task, NULL);
+
+    if(pt != 0)
+
+    {
+
+        perror("创建进程失败");
+
+        return -1;
+
+       
+
+    }
+
+   
+
+    pthread_detach(tid);//分离属性，自动回收
+
+   
+
+    if(!start)
+
+    {
+
+        sleep(1);
+
+        //读取mplayer的内容
+
+        pthread_create(&tid_read, NULL, read_mplayer_task, NULL);//新建线程
+
+        pthread_detach(tid_read);//分离属性，自动回收
+
+        //发送获取时间命令
+
+        pthread_create(&tid_write, NULL, write_mplayer_task, NULL);
+
+        pthread_detach(tid_write);//分离属性，自动收回
+
+        printf("tid_read %ld  tid_write %ld\n",tid_read,tid_write);
+
+        start=1;
+
+    }
+
+   pthread_cond_signal(&cond);//唤醒线程读取mplayer返回的内容
+
+   // *******************************************************************//
+
+    //音量
+
+    int volume=(int)lv_slider_get_value(volume_slider);
+
+    char cmd[1024]={0};
+
+    sprintf(cmd,"volume %d 1\n",volume);
+
+    write(fd_mplayer,cmd,strlen(cmd));
+
+   
+
+}
+
+
+//视频按键事件（没写）
+static void btn_handler2(lv_event_t * e)
+
+{
+
+    lv_event_code_t code = lv_event_get_code(e);
+
+    //获取传递的参数
+
+    char *msg = lv_event_get_user_data(e);
+
+    if(code == LV_EVENT_CLICKED) //点击按钮
+
+    {
+
+        if(strcmp(msg,"pause") == 0)
+
+        {
+
+            if(!start)return;
+
+            pthread_kill(tid_read,10);//暂停读mplayer返回内容      
+
+            system("killall -19 mplayer");
+
+        }
+
+        if(strcmp(msg,"play") == 0)
+
+        {
+
+            if(!start)return;
+
+            system("killall -18 mplayer");//播放器继续
+
+            pthread_cond_signal(&cond);//唤醒读写mplayer
+
+            usleep(1000);
+
+            pthread_cond_signal(&cond);//防止被再次暂停
+
+        }
+
+        if(strcmp(msg,"forward") == 0)
+
+        {
+
+            if(!start)return;
+
+            usleep(1000);
+
+            char  cmd[1024]={"seek +10\n"};
+
+            write(fd_mplayer,cmd,strlen(cmd));  
+
+            strcpy(cmd,"get_percent_pos\n");
+
+            write(fd_mplayer,cmd,strlen(cmd));//发送获取时间命令    
+
+        }
+
+        if(strcmp(msg,"back") == 0)
+
+        {
+
+            if(!start)return;
+
+            usleep(10000);
+
+            char  cmd[1024]={"seek -10\n"};
+
+            write(fd_mplayer,cmd,strlen(cmd));  
+
+            strcpy(cmd,"get_percent_pos\n");
+
+            write(fd_mplayer,cmd,strlen(cmd));//发送获取时间命令  
+
+        }
+
+        if(strcmp(msg,"next_music") == 0)
+
+        {
+
+            usleep(1000);
+
+            if(++video_index >= video_num)video_index=0;
+
+                play_one_video();
+
+        }
+
+        if(strcmp(msg,"prev_music") == 0)
+
+        {
+
+            usleep(1000);
+
+            if(--video_index <= 0)video_index=video_num-1;
+
+                play_one_video();
+
+        }
+
+        if(strcmp(msg,"music_show_list") == 0)
+
+        {
+
+            list_flag=!list_flag;
+
+            if(list_flag)
+
+                lv_obj_clear_flag(video_list,LV_OBJ_FLAG_HIDDEN);        
+
+            else
+
+                lv_obj_add_flag(video_list, LV_OBJ_FLAG_HIDDEN);
+
+        }
+
+       
+
+    }
+
+}
+
+//视频滑动条事件
+static void slider_event_cb2(lv_event_t * e)
+{
+
+    if(!start)return;
+
+    //获取传递的参数
+
+    char *msg = lv_event_get_user_data(e);
+
+    //puts(msg);
+
+    if(strcmp(msg,"volume")==0)
+
+    {  
+
+        lv_obj_t * slider = lv_event_get_target(e);//获取事件对象
+
+        char buf[8];
+
+        int volume=(int)lv_slider_get_value(slider);//获取值
+
+        lv_snprintf(buf, sizeof(buf), "%d",volume);
+
+        lv_label_set_text(volume_label, buf);           //更新音量标签值
+
+        lv_obj_align_to(volume_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+
+        usleep(100);            //修改音量值
+
+        char cmd[1024]={0};
+
+        sprintf(cmd,"volume %d 1\n",volume);
+
+        write(fd_mplayer,cmd,strlen(cmd));  
+
+    }  
+
+    if(strcmp(msg,"play")==0)
+
+    {
+
+        puts("松开了");
+
+        if(start)//启动就先暂停
+
+        {
+
+            pthread_kill(tid_read,10);//暂停读mplayer返回内容      
+
+            system("killall -19 mplayer");
+
+        }
+
+        int rate = (int)lv_slider_get_value(play_slider);//获取值
+
+        float new_time = time_length * rate * 0.01;
+
+        int seek_time = new_time - time_pos;
+
+        char  cmd[1024]={0};
+
+        sprintf(cmd,"seek %d\n",seek_time);
+
+        //puts(cmd);
+
+        write(fd_mplayer,cmd,strlen(cmd));
+
+        system("killall -18 mplayer");//播放器继续
+
+        pthread_cond_signal(&cond);//唤醒读写mplayer
+
+        usleep(1000);
+
+        pthread_cond_signal(&cond);//防止被再次暂停
+
+    }
+
+}
+
+//视频显示滑动条
+
+static void show_slider_tv(void)
+
+{      //音量    
+
+    volume_slider = lv_slider_create(cont);
+
+    lv_obj_align(volume_slider,LV_ALIGN_LEFT_MID,0,20);//位置    
+
+    lv_obj_add_event_cb(volume_slider, slider_event_cb2, LV_EVENT_VALUE_CHANGED, "volume");//事件    
+
+    lv_obj_set_size(volume_slider,18,180);//大小
+
+    lv_slider_set_value(volume_slider,100,LV_ANIM_OFF);//初始值  
+
+    //标签 音量大小
+
+    volume_label = lv_label_create(cont);
+
+    lv_label_set_text(volume_label, "100");
+
+    lv_obj_align_to(volume_label, volume_slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+
+    lv_obj_t *label = lv_label_create(cont);
+
+    lv_obj_add_style(label, &font_style, 0);
+
+    lv_label_set_text(label, "volume");
+
+    lv_obj_align_to(label, volume_label, LV_ALIGN_OUT_TOP_MID, 0, -210);
+
+    //播放进度条
+
+    play_slider = lv_slider_create(cont);
+
+    lv_obj_align(play_slider,LV_ALIGN_CENTER,0,135);//位置  
+
+    lv_obj_set_width(play_slider,600);//宽度
+
+    lv_obj_add_event_cb(play_slider, slider_event_cb2, LV_EVENT_RELEASED , "play");//事件    
+
+    lv_slider_set_value(play_slider,0,LV_ANIM_OFF);//初始值
+
+    lv_slider_set_range(play_slider, 0, 100);//范围
+
+    //在滑条下创建标签
+
+    time_length_label = lv_label_create(cont);
+
+    lv_label_set_text(time_length_label, "0:00");
+
+    lv_obj_align_to(time_length_label, play_slider, LV_ALIGN_OUT_RIGHT_BOTTOM,0,20);
+
+    time_pos_label = lv_label_create(cont);
+
+    lv_label_set_text(time_pos_label, "0:00");
+
+    lv_obj_align_to(time_pos_label, play_slider, LV_ALIGN_OUT_LEFT_BOTTOM,0,20);
+
+}
+
+//显示视频按钮
+static void show_button_tv()
+{
+
+    static lv_style_t btn_style;
+
+    lv_style_init(&btn_style);
+
+    lv_style_set_radius(&btn_style,90);
+
+    lv_style_set_bg_opa(&btn_style, LV_OPA_COVER);
+
+    lv_style_set_bg_color(&btn_style, lv_palette_lighten(LV_PALETTE_BLUE, 1));//按钮色
+
+    //Add a shadow
+
+    lv_style_set_shadow_width(&btn_style, 55);
+
+    lv_style_set_shadow_color(&btn_style, lv_palette_main(LV_PALETTE_BLUE));//背景色
+
+    //按钮的标签
+
+    lv_obj_t *label;
+
+    //暂停按钮
+
+    lv_obj_t *btn_pause = lv_btn_create(cont);
+
+    //按钮事件
+
+    lv_obj_add_event_cb(btn_pause, btn_handler2, LV_EVENT_ALL,"pause");  
+
+    //位置
+
+    lv_obj_align(btn_pause, LV_ALIGN_BOTTOM_MID,40,0);
+
+    //大小
+
+    lv_obj_set_size(btn_pause,60,60);
+
+    //图标
+
+    lv_obj_set_style_bg_img_src(btn_pause,LV_SYMBOL_PAUSE,0);
+
+   
+
+    //播放按钮
+
+    lv_obj_t *btn_play = lv_btn_create(cont);
+
+    lv_obj_add_event_cb(btn_play, btn_handler2, LV_EVENT_ALL,"play");  
+
+    lv_obj_align(btn_play, LV_ALIGN_BOTTOM_MID,-40,0);
+
+    lv_obj_set_size(btn_play,60,60);
+
+    lv_obj_set_style_bg_img_src(btn_play,LV_SYMBOL_PLAY,0);
+
+   
+
+     //快进
+
+    lv_obj_t *btn_forward = lv_btn_create(cont);
+
+    lv_obj_add_event_cb(btn_forward, btn_handler2, LV_EVENT_ALL,"forward");
+
+    lv_obj_set_size(btn_forward,60,60);
+
+    lv_obj_align(btn_forward, LV_ALIGN_BOTTOM_MID,120,0);
+
+    lv_obj_set_style_bg_img_src(btn_forward,LV_SYMBOL_RIGHT LV_SYMBOL_RIGHT,0);
+
+   
+
+    //快退
+
+    lv_obj_t *btn_back = lv_btn_create(cont);
+
+    lv_obj_add_event_cb(btn_back, btn_handler2, LV_EVENT_ALL,"back");
+
+    lv_obj_set_size(btn_back,60,60);
+
+    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_MID,-120,0);
+
+    lv_obj_set_style_bg_img_src(btn_back,LV_SYMBOL_LEFT LV_SYMBOL_LEFT,0);
+
+   
+
+    //下一首
+
+    lv_obj_t *btn_next = lv_btn_create(cont);
+
+    lv_obj_add_event_cb(btn_next, btn_handler2, LV_EVENT_ALL,"next_music");
+
+    lv_obj_set_size(btn_next,60,60);
+
+    lv_obj_align(btn_next, LV_ALIGN_BOTTOM_MID,200,0);
+
+    lv_obj_set_style_bg_img_src(btn_next,LV_SYMBOL_NEXT,0);
+
+   
+
+    //上一首
+
+   
+
+    lv_obj_t *btn_prev = lv_btn_create(cont);
+
+    lv_obj_add_event_cb(btn_prev, btn_handler2, LV_EVENT_ALL,"prev_music");
+
+    lv_obj_set_size(btn_prev,60,60);
+
+    lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_MID,-200,0);
+
+    lv_obj_set_style_bg_img_src(btn_prev,LV_SYMBOL_PREV,0);
+
+   
+
+    //显示,隐藏  歌单列表
+
+    //风格设置
+
+    static lv_style_t style;
+
+    lv_style_init(&style);
+
+    //设置背景颜色和半径
+
+    lv_style_set_radius(&style, 5);
+
+    lv_style_set_bg_opa(&style, LV_OPA_COVER);
+
+    lv_style_set_bg_color(&style, lv_palette_lighten(LV_PALETTE_GREY, 1));
+
+    //添加一个影子
+
+    lv_style_set_shadow_width(&style, 55);
+
+    lv_style_set_shadow_color(&style, lv_palette_main(LV_PALETTE_BLUE));
+
+    //视频单列表
+
+    lv_obj_t *btn_list = lv_btn_create(cont);
+
+    lv_obj_add_event_cb(btn_list, btn_handler2, LV_EVENT_ALL,"music_show_list");
+
+    lv_obj_set_size(btn_list,60,60);
+
+    lv_obj_align(btn_list, LV_ALIGN_BOTTOM_RIGHT,-20,0);
+
+    label = lv_label_create(btn_list);
+
+    lv_obj_add_style(label, &font_style, 0);
+
+    lv_label_set_text(label, "menu");
+
+    lv_obj_center(label);
+
+   
+
+}
+
+//*********************************//
+//下面是视频的函数
+//获取视频的路径，检测本地节目单
+void get_video_path()
+{
+    //读目录,avi后缀保存到数组
+    video_num =0;
+    DIR *dirp = opendir(local_video_path);
+    if(dirp==NULL)
+    {
+        perror(local_video_path);
+        exit(0);
+    }
+    struct dirent* msg;
+    while(1)
+
+    {
+
+        msg = readdir(dirp);
+
+        if(msg == NULL)break;
+
+        if(msg->d_name[0]=='.')continue;
+
+        if(strstr(msg->d_name,".avi"))
+
+        {
+
+            sprintf(video_path[video_num], "%s/%s", local_video_path, msg->d_name);
+
+            video_num++;
+
+            puts(video_path[video_num - 1]);
+
+        }
+
+    }
+
+    printf("检索歌单完成 共%d\n",video_num);
+
+}
+
+
+
+
+static void k(lv_event_t *e)
+{
+    system("killall -9 mplayer");
+}
+
+
+
+//----------属于返回按钮的函数
+void Back_btn(lv_event_t * e)
+{
+    system("killall -9 mplayer");
+    lv_obj_del(lv_obj_get_parent((lv_obj_t *)(e->user_data)));  
+}
+
+static void display_interface2()
+
+{
+
+    //创建背景cont，所有显示基于背景
+
+    cont = lv_obj_create(lv_scr_act());//声明一个背景
+
+    lv_obj_set_size(cont, 800, 480);//设置背景的范围
+
+    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+
+    //基于cont背景创新返回按钮的对象
+
+    lv_obj_t *btn_back = lv_btn_create(cont);
+
+    lv_obj_t *lab6 = lv_label_create(btn_back);
+
+    lv_label_set_text(lab6, "x");
+
+    lv_obj_center(lab6);
+
+    lv_obj_set_style_radius(btn_back,5,0);//设置对象边角为圆角 角度自己调整中间值
+
+    lv_obj_set_size(btn_back, 30, 30);
+
+    lv_obj_set_pos(btn_back, 0, 0);
+
+    lv_obj_add_event_cb(btn_back, Back_btn, LV_EVENT_PRESSED, btn_back); //传入按钮父对象的父对象
+
+    //整一个杀视频的按钮
+
+   
+
+    lv_obj_t* btn01 = lv_btn_create(cont);
+
+    lv_obj_align(btn01, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    lv_obj_t* label01 = lv_label_create(btn01);
+
+    lv_label_set_text(label01, "kill");
+
+    lv_obj_center(label01);
+
+    lv_obj_add_event_cb(btn01, k, LV_EVENT_CLICKED, NULL);//按键事件
+
+    //初始化视频内容
+
+    get_video_path();
+
+    // //显示视频列表
+
+   
+
+    // //显示按钮
+
+     show_button_tv();
+
+   
+
+    // //显示歌单列表
+
+    //  show_list2();
+
+   
+
+    // //显示滑动条
+
+     show_slider_tv();
+
+   
+
+}
+
+
+static void video_playback(lv_event_t* e) {
+
+    if(access("/pipe", F_OK))
+
+    {
+
+        mkfifo("/pipe", 0644);
+
+    }
+
+    fd_mplayer = open("/pipe", O_RDWR);
+
+    if(fd_mplayer < 0)
+
+    {
+
+        perror("打开管道文件失败");
+
+        exit(0);
+
+    }
+
+    display_interface2();
+
+}
+
+
+
+void Pro_BrowerCreate(){
+
+
+
+
+    // if( access("/tmp/myFifo", F_OK ))
+    // {
+    //     if(mkfifo("/tmp/myFifo", 0666 ))
+    //     {
+    //         perror("mkfifo error");
+    //         return -1 ;
+    //     }
+    // }
+    
+    // int fd_fifo = open("/tmp/myFifo" , O_RDWR );
+    // if (fd_fifo == -1 )
+    // {
+    //     perror("open fifor error");
+    //     return -1 ;
+    // }
+    
+    
+    // FILE * fp =  popen("mplayer -quiet -slave -input file=/tmp/myFifo -geometry 100:100 -zoom -x 600 -y 300  /evan_work/03.avi &" , "r");
+    // // system("mplayer -quiet -slave -input file=/tmp/myFifo /Even/video/Faded3.avi &" );// 直接执行该命令 & 指该命令在后台执行
+
+    // pthread_t tid ;
+    // pthread_create( &tid , NULL , getMplayerMsg ,  fp  );
+
+
+    // char * cmd = "get_percent_pos\n" ;
+
+    // while(1)
+    // {
+    //     sleep(3) ;
+    //     write(fd_fifo , cmd  , strlen(cmd ) );
+    //     printf("申请获得时间。。。。。\n");
+    // }
+    
+    lv_obj_t* btn01 = lv_btn_create(lv_scr_act());
+    lv_obj_align(btn01, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_t* label01 = lv_label_create(btn01);
+    lv_label_set_text(label01, "video");
+    lv_obj_align(btn01, LV_ALIGN_CENTER,0,-50);
+    lv_obj_center(label01);
+    lv_obj_add_event_cb(btn01, video_playback, LV_EVENT_CLICKED, NULL);//按键事件
+
+
+
+}
 
 
 

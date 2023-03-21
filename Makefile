@@ -5,12 +5,12 @@ CC = arm-linux-gcc
 LVGL_DIR_NAME ?= lvgl
 LVGL_DIR ?= ${shell pwd}
 CFLAGS ?= -O3 -g0   -I$(LVGL_DIR)/ -Wall  -std=gnu99
-LDFLAGS ?= -lm 
-BIN = 02demo
+LDFLAGS ?= -lm -lpthread
+BIN = demo
 
 
 #Collect the files to compile
-MAINSRC = ./main.c ./pro_manage.c
+MAINSRC = ./main.c ./pro_manage.c 
 
 include $(LVGL_DIR)/lvgl/lvgl.mk
 include $(LVGL_DIR)/lv_drivers/lv_drivers.mk
