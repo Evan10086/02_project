@@ -52,6 +52,17 @@ static lv_obj_t *title_label;           //图片信息标签
 static lv_obj_t *words_label;           //歌词标签
 static lv_obj_t * volume_label;         //音量标签
 static lv_obj_t *time_length_label;     //时长标签
+static lv_obj_t *app1;                  //app1
+static lv_obj_t *app2;                  //app1
+static lv_obj_t *app3;                  //app1
+static lv_obj_t *app4;                  //app1
+static lv_obj_t *app5;                  //app1
+static lv_obj_t *app6;                  //app1
+static lv_obj_t *app7;                  //app1
+static lv_obj_t *app8;                  //app1
+static lv_obj_t *app9;                  //app1
+static lv_obj_t *app10;                  //app1
+
 static lv_obj_t *time_pos_label;        //当前时间标签
 static lv_obj_t *words_list;            //歌词标签  
 pthread_cond_t cond;                    //条件变量，用于暂停读取mplayer
@@ -60,59 +71,6 @@ pthread_mutex_t mutex;
 pthread_mutex_t mutex1;
 pthread_t tid_read;         //读mplayer的线程id
 pthread_t tid_write;        //写mplayer的线程id
-
-
-//这里为音乐播放器部分******************************************************************************************************************************
-//获取音乐的路径，检测本地歌单
-void get_music_path()           
-{
-    //读目录,mp3后缀保存到数组
-    music_num =0;
-    DIR *dirp = opendir(local_music_path);
-    if(dirp==NULL)
-    {
-        perror(local_music_path);
-        exit(0);
-    }
-    struct dirent* msg;
-    while(1)
-    {
-        msg = readdir(dirp);
-        if(msg == NULL)break;
-        if(msg->d_name[0]=='.')continue;
-        if(strstr(msg->d_name,".mp3"))
-        {
-            sprintf(music_path[music_num], "%s/%s", local_music_path, msg->d_name);
-            //拼接图片与歌词路径↓
-            char name[100]={0};
-            strcpy(name,strtok(msg->d_name,"."));
-            sprintf(pic_path[music_num], "S:%s/%s.png", local_pic_path, name);
-            sprintf(words_path[music_num], "%s/%s.txt", local_words_path, name);
-            //拼接图片与歌词路径↑
-            music_num++;
-            puts(music_path[music_num - 1]);
-            puts(pic_path[music_num - 1]);
-            puts(words_path[music_num - 1]);
-        }
-    }
-    printf("检索歌单完成 共%d\n",music_num);
-}
-
-//歌曲封面
-void init_pic_parent_obj()
-{
-    //在屏幕中创建一个对象
-    lv_obj_t * img = lv_obj_create(cont);
-    //取消滚动
-    lv_obj_clear_flag(img, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(img, 200, 200);
-    lv_obj_align(img, LV_ALIGN_CENTER, 0, -60);
-    // lv_obj_set_style_pad_all
-    //图片对象
-    pic_obj = lv_img_create(img);
-    lv_obj_center(pic_obj);  
-}
-
 
 //信号任务
 void signal_10_task(int arg)
@@ -140,50 +98,6 @@ void signal_12_task(int arg)
 }
 static char words_line[1024]={0};
 
-
-//初始化歌曲信息的父对象
-void init_title_obj()
-{
-    // //在屏幕中创建一个对象
-    lv_obj_t * title = lv_obj_create(cont);
-    lv_obj_clear_flag(title, LV_OBJ_FLAG_SCROLLABLE);//禁用滚动
-    lv_obj_set_size(title, 200, 50);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
-    //标题标签
-    title_label = lv_label_create(title);
-    lv_obj_center(title_label);
-    lv_label_set_text(title_label, "music");
-    //歌词标签
-    words_label = lv_label_create(cont);
-    lv_obj_align(words_label,LV_ALIGN_CENTER,0,70);
-    lv_label_set_text(words_label,"llllll");
-}
-
-
-//找歌词
-void *find_words_task(void *arg)
-{  
-    char *p=strstr(words_buf,(char *)arg);//寻找这个时间有没有歌词
-    if(p!=NULL)                 //和歌词相同时间
-    {            
-        char buf[1024]={0};
-        sscanf(p,"%s",buf);
-        char *q = strrchr(buf,']');
-        sscanf(++q,"%s",buf);  
-        if(strcmp(buf,words_line))//不相同
-        {
-            strcpy(words_line,buf);
-            //puts(words_line);  
-            //**********歌词标签
-            //lv_label_set_text(words_label,words_line);
-            pthread_mutex_lock(&mutex_lv);//上锁
-            lv_label_set_text(words_label,words_line);
-            pthread_mutex_unlock(&mutex_lv);
-        }    
-    }
-}
-
-
 //线程任务 读播放器返回内容
 static char show_time_buf[100]={0};
 void *read_mplayer_task(void *arg)
@@ -204,7 +118,7 @@ void *read_mplayer_task(void *arg)
             p=strrchr(line,'=');
             p++;    
             sscanf(p,"%f",&time_pos);
-            printf("歌曲播放时间 %.2f\n",time_pos);
+            printf("播放时间 %.2f\n",time_pos);
             char tmp[100]={0};
             int tmp_time=time_pos;
             sprintf(tmp,"%02d:%02d",tmp_time/60,tmp_time % 60);
@@ -218,9 +132,9 @@ void *read_mplayer_task(void *arg)
             }
             puts(tmp);//打印时间  00:00
             //*********开启线程找歌词**********//
-            pthread_t tid;
-            pthread_create(&tid,NULL,find_words_task,tmp);
-            pthread_detach(tid);    
+            // pthread_t tid;
+            // pthread_create(&tid,NULL,find_words_task,tmp);
+            // pthread_detach(tid);    
             //********************************//
         }
         if(strstr(line,"ANS_PERCENT_POSITION"))//播放百分比
@@ -240,7 +154,7 @@ void *read_mplayer_task(void *arg)
             if(percent_pos>=99){
                 usleep(1000);
                 if(++video_index >= video_num)video_index=0;
-                play_one_video();
+                play_one_video(); //播放下一个视频
             }
             // if(percent_pos>=99)//播完了
             // {
@@ -309,189 +223,34 @@ void *write_mplayer_task(void *arg)
 }
 
 
-//线程任务 创建子进程播放音乐
-void *play_music_task(void *arg)
-{    
-    printf("---- %ld线程任务------------------\n",pthread_self());
-    //拼接命令
-    char cmd[1024]="mplayer -slave -quiet -input file=/pipe";
-    sprintf(cmd,"%s %s",cmd,music_path[music_index]);
-    //puts(cmd);  
-    //播放音乐
-    fp_mplayer = popen(cmd, "r");
-    if (fp_mplayer == NULL)perror("popen fail:");
-    puts("----线程任务(启动播放音乐)完成 -----------------------\n");
-    strcpy(cmd,"get_time_length\n");    //获取长度
-
-    printf("test: %s\n",cmd);
-
-    write(fd_mplayer,cmd,strlen(cmd));
-    strcpy(cmd,"get_time_pos\n");    //发送获取时间命令
-    write(fd_mplayer,cmd,strlen(cmd));
-    pthread_exit(NULL);//线程结束
-
-    
-}
-//signal(SIGPIPE, SIG_IGN);//捕获 SIGPIPE 信号
-
-//播放一首音乐
-void play_one_music()
-{  
-    if(play_flag != 0)//看看有没有线程在使用播放器
-    {
-        system("killall -9 mplayer");
-    }
-    play_flag=1;
-    printf("音乐索引%d\n", music_index);
-    //开启线程播放音乐
-    pthread_t tid;
-    int pt = pthread_create(&tid, NULL, play_music_task, NULL);
-    if(pt != 0)
-    {
-        perror("创建进程失败");
-        return -1;
-    }
-    pthread_detach(tid);//分离属性，自动回收
-    if(!start)
-    {
-        sleep(1);
-        //读取mplayer的内容
-        pthread_create(&tid_read, NULL, read_mplayer_task, NULL);//新建线程
-        pthread_detach(tid_read);//分离属性，自动回收
-        //发送获取时间命令
-        pthread_create(&tid_write, NULL, write_mplayer_task, NULL);
-        pthread_detach(tid_write);//分离属性，自动收回
-        printf("tid_read %ld  tid_write %ld\n",tid_read,tid_write);
-        start=1;
-    }
-    pthread_cond_signal(&cond);//唤醒线程读取mplayer返回的内容
-    //***************************************************************//
-    char tmp[100]={0};
-    char *p = strrchr(music_path[music_index],'/');
-    strcpy(tmp,++p);
-    lv_label_set_text(title_label,strtok(tmp,"."));
-    lv_label_set_text(words_label,strtok(tmp,"."));
-    //显示音乐图片
-    lv_img_set_src(pic_obj,pic_path[music_index]);
-     //打开歌词文件
-    FILE *fp = fopen(words_path[music_index],"r");
-    memset(words_buf,0,sizeof(words_buf));
-    if(fp!=NULL)
-    {
-        fread(words_buf,5*1024,4,fp);
-    }
-    fclose(fp);
-    //设置播放属性
-    int ret = lv_dropdown_get_selected(speed_obj);
-    //音量
-    int volume=(int)lv_slider_get_value(volume_slider);
-    char cmd[1024]={0};
-    sprintf(cmd,"volume %d 1\n",volume);
-    write(fd_mplayer,cmd,strlen(cmd));
-    //修改播放速度
-    switch (ret)
-    {
-        case 0:{
-                char cmd[1024]={"speed_set 1\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                break;
-                }
-        case 1:{      
-                char cmd[1024]={"speed_set 1.25\n"};
-                write(fd_mplayer,cmd,strlen(cmd));  
-                break;    
-                }
-        case 2:{      
-                char cmd[1024]={"speed_set 1.5\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                break;
-                }
-        case 3:{      
-                char cmd[1024]={"speed_set 2\n"};        
-                write(fd_mplayer,cmd,strlen(cmd));        
-                break;
-        }          
-        default:        
-                break;
-    }
-    //播放模式
-    int mod = lv_dropdown_get_selected(play_mode);
-    switch (mod)
-    {
-        case 0:{
-                char cmd[1024]={"loop -1\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                break;
-                }
-        case 1:{
-                char cmd[1024]={"loop -1\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                strcpy(cmd,"loop 1\n");write(fd_mplayer,cmd,strlen(cmd));        
-                break;
-                }
-        case 2://列表循环
-                {        
-                break;    
-                }
-        case 3://随机播放
-                {      
-                break;
-                }          
-        default:        
-                break;
-    }
-}
-
-
-//列表处理函数,播放列表中的音乐
-static lv_event_cb_t event_handler_music_list(lv_event_t * e)
-{
-    //获取事件码
-    lv_event_code_t code = lv_event_get_code(e);
-    //获取事件对象,这里是按钮
-    lv_obj_t * obj = lv_event_get_target(e);
-    //如果点击按钮
-    if(code == LV_EVENT_CLICKED)
-    {
-        //打印按钮中的文本
-        //LV_LOG_USER("Clicked: %s", lv_list_get_btn_text(music_list, obj));
-        printf("Clicked  %s\n", lv_list_get_btn_text(music_list, obj));
-        //当前播放中的音乐下标更新为点击列表的下标
-        music_index = lv_event_get_user_data(e);
-        play_one_music();        
-    }
-}      
-
-
-//显示歌单列表
-static void show_list()
-{
-    //创建列表文本框
-    music_list = lv_list_create(cont);
-    //添加风格
-    // lv_obj_add_style(music_list, &font_style, 0);
-    lv_obj_set_size(music_list, 180, 300);
-    //列表位置
-    //lv_obj_center(music_list);
-    lv_obj_align(music_list, LV_ALIGN_RIGHT_MID, -20, -80);
-    //添加文本
-    lv_list_add_text(music_list, "Music list");
-    /*在列表中添加按钮*/
-    lv_obj_t *btn;
-    for(int i = 0; i < music_num; i++)
-    {
-        char tmp[100]={0};
-        char *p = music_path[i];
-        p = strrchr(p,'/');
-        strcpy(tmp,++p);//裁剪到只剩音乐名字  music.mp3
-        //参数：列表对象，图标宏，按钮名
-        btn = lv_list_add_btn(music_list, NULL,strtok(tmp,"."));
-        //列表按钮风格
-        // lv_obj_add_style(music_list, &font_style, 0);
-        //触发事件，把下标传递
-        lv_obj_add_event_cb(btn, event_handler_music_list, LV_EVENT_CLICKED, i);
-    }
-}
+// static void show_list()
+// {
+//     //创建列表文本框
+//     music_list = lv_list_create(cont);
+//     //添加风格
+//     // lv_obj_add_style(music_list, &font_style, 0);
+//     lv_obj_set_size(music_list, 180, 300);
+//     //列表位置
+//     //lv_obj_center(music_list);
+//     lv_obj_align(music_list, LV_ALIGN_RIGHT_MID, -20, -80);
+//     //添加文本
+//     lv_list_add_text(music_list, "Music list");
+//     /*在列表中添加按钮*/
+//     lv_obj_t *btn;
+//     for(int i = 0; i < music_num; i++)
+//     {
+//         char tmp[100]={0};
+//         char *p = music_path[i];
+//         p = strrchr(p,'/');
+//         strcpy(tmp,++p);//裁剪到只剩音乐名字  music.mp3
+//         //参数：列表对象，图标宏，按钮名
+//         btn = lv_list_add_btn(music_list, NULL,strtok(tmp,"."));
+//         //列表按钮风格
+//         // lv_obj_add_style(music_list, &font_style, 0);
+//         //触发事件，把下标传递
+//         lv_obj_add_event_cb(btn, event_handler_music_list, LV_EVENT_CLICKED, i);
+//     }
+// }
 
 
 //按钮事件
@@ -604,281 +363,7 @@ static void btn_handler(lv_event_t * e)
 }
 
 
-//显示按钮
-void show_button()
-{
-    //风格设置
-    static lv_style_t btn_style;
-    lv_style_init(&btn_style);
-    /*Set a background color and a radius*/
-    lv_style_set_radius(&btn_style,90);
-    lv_style_set_bg_opa(&btn_style, LV_OPA_COVER);
-    lv_style_set_bg_color(&btn_style, lv_palette_lighten(LV_PALETTE_BLUE, 1));//按钮色
-    /*Add a shadow*/
-    // lv_style_set_shadow_width(&btn_style, 55);
-    // lv_style_set_shadow_color(&btn_style, lv_palette_main(LV_PALETTE_BLUE));//背景色
-    //按钮的标签
-    lv_obj_t *label;
-    //暂停按钮
-    lv_obj_t *btn_pause = lv_btn_create(cont);
-    //按钮事件
-    lv_obj_add_event_cb(btn_pause, btn_handler, LV_EVENT_ALL,"pause");  
-    //位置
-    lv_obj_align(btn_pause, LV_ALIGN_BOTTOM_MID,40,-10);
-    //大小
-    lv_obj_set_size(btn_pause,60,60);
-    //图标
-    lv_obj_set_style_bg_img_src(btn_pause,LV_SYMBOL_PAUSE,0);
-    //添加风格
-    lv_obj_add_style(btn_pause,&btn_style,0);
-    //播放按钮
-    lv_obj_t *btn_play = lv_btn_create(cont);
-    lv_obj_add_event_cb(btn_play, btn_handler, LV_EVENT_ALL,"play");  
-    lv_obj_align(btn_play, LV_ALIGN_BOTTOM_MID,-40,-10);
-    lv_obj_set_size(btn_play,60,60);
-    lv_obj_set_style_bg_img_src(btn_play,LV_SYMBOL_PLAY,0);
-    lv_obj_add_style(btn_play,&btn_style,0);
-    //快进
-    lv_obj_t *btn_forward = lv_btn_create(cont);
-    lv_obj_add_event_cb(btn_forward, btn_handler, LV_EVENT_ALL,"forward");
-    lv_obj_set_size(btn_forward,60,60);
-    lv_obj_align(btn_forward, LV_ALIGN_BOTTOM_MID,120,-10);
-    lv_obj_set_style_bg_img_src(btn_forward,LV_SYMBOL_RIGHT LV_SYMBOL_RIGHT,0);
-    lv_obj_add_style(btn_forward,&btn_style,0);
-    //快退
-    lv_obj_t *btn_back = lv_btn_create(cont);
-    lv_obj_add_event_cb(btn_back, btn_handler, LV_EVENT_ALL,"back");
-    lv_obj_set_size(btn_back,60,60);
-    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_MID,-120,-10);
-    lv_obj_set_style_bg_img_src(btn_back,LV_SYMBOL_LEFT LV_SYMBOL_LEFT,0);
-    lv_obj_add_style(btn_back,&btn_style,0);
-    //下一首
-    lv_obj_t *btn_next = lv_btn_create(cont);
-    lv_obj_add_event_cb(btn_next, btn_handler, LV_EVENT_ALL,"next_music");
-    lv_obj_set_size(btn_next,60,60);
-    lv_obj_align(btn_next, LV_ALIGN_BOTTOM_MID,200,-10);
-    lv_obj_set_style_bg_img_src(btn_next,LV_SYMBOL_NEXT,0);
-    lv_obj_add_style(btn_next,&btn_style,0);
-    //上一首
-    lv_obj_t *btn_prev = lv_btn_create(cont);
-    lv_obj_add_event_cb(btn_prev, btn_handler, LV_EVENT_ALL,"prev_music");
-    lv_obj_set_size(btn_prev,60,60);
-    lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_MID,-200,-10);
-    lv_obj_set_style_bg_img_src(btn_prev,LV_SYMBOL_PREV,0);
-    lv_obj_add_style(btn_prev,&btn_style,0);
-    //显示,隐藏  歌单列表
-    //风格设置
-    static lv_style_t style;
-    lv_style_init(&style);
-    /*设置背景颜色和半径*/
-    lv_style_set_radius(&style, 5);
-    lv_style_set_bg_opa(&style, LV_OPA_COVER);
-    lv_style_set_bg_color(&style, lv_palette_lighten(LV_PALETTE_GREY, 1));
-    /*添加一个影子*/
-    // lv_style_set_shadow_width(&style, 55);
-    // lv_style_set_shadow_color(&style, lv_palette_main(LV_PALETTE_BLUE));
-    //歌单列表
-    lv_obj_t *btn_list = lv_btn_create(cont);
-    lv_obj_add_event_cb(btn_list, btn_handler, LV_EVENT_ALL,"show_list");
-    lv_obj_set_size(btn_list,50,30);
-    lv_obj_align(btn_list, LV_ALIGN_BOTTOM_RIGHT,0,0);
-    label = lv_label_create(btn_list);
-    // lv_obj_add_style(label, &font_style, 0);
-    lv_label_set_text(label, "menu");
-    lv_obj_center(label);
-    lv_obj_add_style(btn_list, &style, 0);
-}
 
-
-//下拉列表事件
-static void dd_handler(lv_event_t * e)
-{
-    //获取事件码
-    lv_event_code_t code = lv_event_get_code(e);
-    //获取传递的参数
-    char *msg = lv_event_get_user_data(e);  
-    if(code == LV_EVENT_VALUE_CHANGED)//值被修改
-    {
-        if(strcmp(msg,"speed")==0)
-        {
-            //获取事件对象
-            //lv_obj_t *speed = lv_event_get_target(e);
-            int ret = lv_dropdown_get_selected(speed_obj);
-            //printf("ret = %d\n",ret);
-            //修改播放速度
-            switch (ret)
-            {
-            case 0:
-            {
-                char  cmd[1024]={"speed_set 1\n"};
-                write(fd_mplayer,cmd,strlen(cmd));  
-                break;
-            }
-            case 1:
-            {
-                char  cmd[1024]={"speed_set 1.25\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                break;
-            }
-            case 2:
-            {
-                char  cmd[1024]={"speed_set 1.5\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                break;
-            }
-            case 3:
-            {
-                char  cmd[1024]={"speed_set 2\n"};
-                write(fd_mplayer,cmd,strlen(cmd));
-                break;
-            }          
-            default:
-                break;
-            }
-        }
-        if(strcmp(msg,"play_mode")==0)
-        {
-            //播放模式
-            int mod = lv_dropdown_get_selected(play_mode);
-            switch (mod)
-            {
-            case 0:{char cmd[1024]={"loop -1\n"};write(fd_mplayer,cmd,strlen(cmd));break;}
-            case 1:
-            { char cmd[1024]={"loop -1\n"};write(fd_mplayer,cmd,strlen(cmd));
-            strcpy(cmd,"loop 1\n");write(fd_mplayer,cmd,strlen(cmd));        break;}
-            case 2://列表循环
-            {        break;    }
-            case 3://随机播放
-            {       break;
-            }          
-            default:        break;
-            }
-        }
-    }
-}
-
-
-//显示下拉列表
-static void show_drop_down()
-{
-    static const char * opts = "x1\n"
-                               "x1.25\n"
-                               "x1.5\n"
-                               "x2";
-    static const char * opts1 = "single\n"
-                               "circle\n"
-                               "list\n"
-                               "random";                          
-    //播放速度 创建一个对象
-    speed_obj = lv_dropdown_create(cont);
-    //lv_dropdown_set_text(speed_obj, "Speed");
-    //触发事件
-    lv_obj_add_event_cb(speed_obj,dd_handler,LV_EVENT_ALL,"speed");
-    //添加选项
-    lv_dropdown_set_options_static(speed_obj, opts);
-    //大小
-    lv_obj_set_size(speed_obj,80,40);
-    //位置
-    lv_obj_align(speed_obj, LV_ALIGN_BOTTOM_RIGHT, -60, -20);
-    //箭头位置，现在由低朝上
-    lv_dropdown_set_dir(speed_obj, LV_DIR_BOTTOM);
-    //列表弹出方向
-    lv_dropdown_set_symbol(speed_obj, LV_SYMBOL_UP);
-    //标签
-    lv_obj_t *speed_label = lv_label_create(cont);
-    // lv_obj_add_style(speed_label, &font_style, 0);
-    lv_label_set_text(speed_label, "speed");
-    lv_obj_align_to(speed_label, speed_obj, LV_ALIGN_OUT_TOP_MID, 0, 0);
-    //播放模式
-    play_mode = lv_dropdown_create(cont);
-    //添加字体
-    //lv_obj_add_style(play_mode, &font_style, 0);
-    lv_obj_add_event_cb(play_mode,dd_handler,LV_EVENT_ALL,"play_mode");
-    lv_dropdown_set_options_static(play_mode, opts1);
-    lv_obj_set_size(play_mode,100,40);
-    //位置
-    lv_obj_align(play_mode, LV_ALIGN_BOTTOM_LEFT, 40, -20);
-    lv_dropdown_set_dir(play_mode, LV_DIR_BOTTOM);
-    lv_dropdown_set_symbol(play_mode, LV_SYMBOL_UP);
-    lv_obj_t *mode_label = lv_label_create(cont);
-    // lv_obj_add_style(mode_label, &font_style, 0);
-    lv_label_set_text(mode_label, "mode");
-    lv_obj_align_to(mode_label, play_mode, LV_ALIGN_OUT_TOP_MID, 0, 0);
-}
-
-
-//滑动条事件
-static void slider_event_cb(lv_event_t * e)
-{
-    if(!start)return;
-    //获取传递的参数
-    char *msg = lv_event_get_user_data(e);
-    //puts(msg);
-    if(strcmp(msg,"volume")==0)
-    {  
-        lv_obj_t * slider = lv_event_get_target(e);//获取事件对象
-        char buf[8];
-        int volume=(int)lv_slider_get_value(slider);//获取值
-        lv_snprintf(buf, sizeof(buf), "%d",volume);
-        lv_label_set_text(volume_label, buf);           //更新音量标签值
-        lv_obj_align_to(volume_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-        usleep(100);            //修改音量值
-        char cmd[1024]={0};
-        sprintf(cmd,"volume %d 1\n",volume);
-        write(fd_mplayer,cmd,strlen(cmd));  
-    }  
-    if(strcmp(msg,"play")==0)
-    {
-        puts("松开了");
-        if(start)//启动就先暂停
-        {pthread_kill(tid_read,10);//暂停读mplayer返回内容      
-        system("killall -19 mplayer");}
-        int rate = (int)lv_slider_get_value(play_slider);//获取值
-        float new_time = time_length * rate * 0.01;
-        int seek_time = new_time - time_pos;
-        char  cmd[1024]={0};
-        sprintf(cmd,"seek %d\n",seek_time);
-        //puts(cmd);
-        write(fd_mplayer,cmd,strlen(cmd));
-        system("killall -18 mplayer");//播放器继续
-        pthread_cond_signal(&cond);//唤醒读写mplayer
-        usleep(1000);
-        pthread_cond_signal(&cond);//防止被再次暂停
-    }
-}
-
-
-//显示滑动条
-static void show_slider(void)
-{      //音量    
-    volume_slider = lv_slider_create(cont);
-    lv_obj_align(volume_slider,LV_ALIGN_LEFT_MID,20,20);//位置    
-    lv_obj_add_event_cb(volume_slider, slider_event_cb, LV_EVENT_VALUE_CHANGED, "volume");//事件    
-    lv_obj_set_size(volume_slider,18,180);//大小
-    lv_slider_set_value(volume_slider,100,LV_ANIM_OFF);//初始值  
-    /*标签 音量大小 */
-    volume_label = lv_label_create(cont);
-    lv_label_set_text(volume_label, "100");
-    lv_obj_align_to(volume_label, volume_slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_t *label = lv_label_create(cont);
-    // lv_obj_add_style(label, &font_style, 0);
-    lv_label_set_text(label, "volume");
-    lv_obj_align_to(label, volume_label, LV_ALIGN_OUT_TOP_MID, 0, -210);
-    //播放进度条
-    play_slider = lv_slider_create(cont);
-    lv_obj_align(play_slider,LV_ALIGN_CENTER,0,120);//位置  
-    lv_obj_set_width(play_slider,400);//宽度
-    lv_obj_add_event_cb(play_slider, slider_event_cb, LV_EVENT_RELEASED , "play");//事件    
-    lv_slider_set_value(play_slider,0,LV_ANIM_OFF);//初始值
-    lv_slider_set_range(play_slider, 0, 100);//范围
-    /*在滑条下创建标签*/
-    time_length_label = lv_label_create(cont);
-    lv_label_set_text(time_length_label, "0:00");
-    lv_obj_align_to(time_length_label, play_slider, LV_ALIGN_OUT_RIGHT_BOTTOM,0,20);
-    time_pos_label = lv_label_create(cont);
-    lv_label_set_text(time_pos_label, "0:00");
-    lv_obj_align_to(time_pos_label, play_slider, LV_ALIGN_OUT_LEFT_BOTTOM,0,20);
-}
 
 
 //----------属于返回按钮的函数
@@ -888,38 +373,7 @@ void Back_btn(lv_event_t * e)
     lv_obj_del(lv_obj_get_parent((lv_obj_t *)(e->user_data)));  
 }
 
-//显示界面
-static void display_interface()
-{
-    //创建背景cont，所有显示基于背景
-    cont = lv_obj_create(lv_scr_act());//声明一个背景
-    lv_obj_set_size(cont, 800, 480);//设置背景的范围
-    // lv_obj_set_style_bg_color(cont, lv_palette_main(LV_PALETTE_LIGHT_BLUE), 0);
-    // lv_obj_set_style_bg_grad_color(cont, lv_palette_main(LV_PALETTE_LIGHT_GREEN), 0);
-    // lv_obj_set_style_bg_grad_dir(cont, LV_GRAD_DIR_VER, 0);
-    //基于cont背景创新返回按钮的对象
-    lv_obj_t * btn_back = lv_btn_create(cont);
-    lv_obj_t* lab6 = lv_label_create(btn_back);
-    lv_label_set_text(lab6, "X");
-    lv_obj_center(lab6);
-    lv_obj_set_style_radius(btn_back,5,0);//设置对象边角为圆角 角度自己调整中间值
-    lv_obj_set_size(btn_back, 50, 50);
-    lv_obj_set_pos(btn_back, 0, 0);
-    lv_obj_add_event_cb(btn_back, Back_btn, LV_EVENT_PRESSED, btn_back); //传入按钮父对象的父对象
-    
-    // lv_obj_add_event_cb(btn_back, Back_btn, LV_EVENT_PRESSED, btn_back); //传入按钮父对象的父对象
-    //初始化图片父对象
-    init_pic_parent_obj();
-    init_title_obj();
-    //显示歌单列表
-    show_list();
-    //显示按钮
-    show_button();
-    //显示下拉列表
-    show_drop_down();
-    //显示滑动条
-    show_slider();
-}
+
 
 
 
@@ -963,7 +417,7 @@ void *play_video_task(void *arg)
 {
     printf("---- %ld线程任务------------------\n",pthread_self());
     //拼接命令
-    char cmd[1024]="mplayer -quiet -slave -zoom -x 530 -y 340 -geometry 110:7 -input file=/pipe";
+    char cmd[1024]="mplayer -quiet -slave -zoom -x 530 -y 340 -geometry 125:9 -input file=/pipe";
     sprintf(cmd,"%s %s",cmd,video_path[video_index]);
     printf("命令：%s\n", cmd);
     fp_mplayer = popen(cmd, "r");
@@ -1099,43 +553,40 @@ static void show_button_tv()
     lv_obj_t *label;
     //暂停按钮
     lv_obj_t *btn_pause = lv_btn_create(cont);
-    //按钮事件
     lv_obj_add_event_cb(btn_pause, btn_handler2, LV_EVENT_ALL,"pause");  
-    //位置
-    lv_obj_align(btn_pause, LV_ALIGN_BOTTOM_MID,40,0);
-    //大小
+    lv_obj_align(btn_pause, LV_ALIGN_BOTTOM_MID,35,0);
     lv_obj_set_size(btn_pause,60,60);
     //图标
     lv_obj_set_style_bg_img_src(btn_pause,LV_SYMBOL_PAUSE,0);
     //播放按钮
     lv_obj_t *btn_play = lv_btn_create(cont);
     lv_obj_add_event_cb(btn_play, btn_handler2, LV_EVENT_ALL,"play");  
-    lv_obj_align(btn_play, LV_ALIGN_BOTTOM_MID,-40,0);
+    lv_obj_align(btn_play, LV_ALIGN_BOTTOM_MID,-45,0);
     lv_obj_set_size(btn_play,60,60);
     lv_obj_set_style_bg_img_src(btn_play,LV_SYMBOL_PLAY,0);
      //快进
     lv_obj_t *btn_forward = lv_btn_create(cont);
     lv_obj_add_event_cb(btn_forward, btn_handler2, LV_EVENT_ALL,"forward");
     lv_obj_set_size(btn_forward,60,60);
-    lv_obj_align(btn_forward, LV_ALIGN_BOTTOM_MID,120,0);
+    lv_obj_align(btn_forward, LV_ALIGN_BOTTOM_MID,115,0);
     lv_obj_set_style_bg_img_src(btn_forward,LV_SYMBOL_RIGHT LV_SYMBOL_RIGHT,0);
     //快退
     lv_obj_t *btn_back = lv_btn_create(cont);
     lv_obj_add_event_cb(btn_back, btn_handler2, LV_EVENT_ALL,"back");
     lv_obj_set_size(btn_back,60,60);
-    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_MID,-120,0);
+    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_MID,-125,0);
     lv_obj_set_style_bg_img_src(btn_back,LV_SYMBOL_LEFT LV_SYMBOL_LEFT,0);
     //下一首
     lv_obj_t *btn_next = lv_btn_create(cont);
     lv_obj_add_event_cb(btn_next, btn_handler2, LV_EVENT_ALL,"next_music");
     lv_obj_set_size(btn_next,60,60);
-    lv_obj_align(btn_next, LV_ALIGN_BOTTOM_MID,200,0);
+    lv_obj_align(btn_next, LV_ALIGN_BOTTOM_MID,195,0);
     lv_obj_set_style_bg_img_src(btn_next,LV_SYMBOL_NEXT,0);
     //上一首
     lv_obj_t *btn_prev = lv_btn_create(cont);
     lv_obj_add_event_cb(btn_prev, btn_handler2, LV_EVENT_ALL,"prev_music");
     lv_obj_set_size(btn_prev,60,60);
-    lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_MID,-200,0);
+    lv_obj_align(btn_prev, LV_ALIGN_BOTTOM_MID,-205,0);
     lv_obj_set_style_bg_img_src(btn_prev,LV_SYMBOL_PREV,0);
     //显示,隐藏  歌单列表
     //风格设置
@@ -1151,12 +602,13 @@ static void show_button_tv()
     //视频单列表
     lv_obj_t *btn_list = lv_btn_create(cont);
     lv_obj_add_event_cb(btn_list, btn_handler2, LV_EVENT_ALL,"music_show_list");
-    lv_obj_set_size(btn_list,60,30);
+    lv_obj_set_size(btn_list,60,50);
     lv_obj_align(btn_list, LV_ALIGN_BOTTOM_RIGHT,-0,0);
     label = lv_label_create(btn_list);
     // lv_obj_add_style(label, &font_style, 0);
     lv_label_set_text(label, "menu");
     lv_obj_center(label);
+    lv_obj_add_flag(btn_list, LV_OBJ_FLAG_CHECKABLE);
 }
 
 
@@ -1203,42 +655,46 @@ static void slider_event_cb2(lv_event_t * e)
 }
 
 
-//视频显示滑动条
+//视频显示滑动条  -5
 static void show_slider_tv(void)
 {      //音量    
     volume_slider = lv_slider_create(cont);
-    lv_obj_align(volume_slider,LV_ALIGN_LEFT_MID,15,20);//位置    
+    lv_obj_align(volume_slider,LV_ALIGN_LEFT_MID,25,0);//位置    
     lv_obj_add_event_cb(volume_slider, slider_event_cb2, LV_EVENT_VALUE_CHANGED, "volume");//事件    
     lv_obj_set_size(volume_slider,18,180);//大小
     lv_slider_set_value(volume_slider,100,LV_ANIM_OFF);//初始值  
     //标签 音量大小
     volume_label = lv_label_create(cont);
     lv_label_set_text(volume_label, "100");
-    lv_obj_align_to(volume_label, volume_slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+    lv_obj_align_to(volume_label, volume_slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 15);
     lv_obj_t *label = lv_label_create(cont);
     // lv_obj_add_style(label, &font_style, 0);
     lv_label_set_text(label, "volume");
     lv_obj_align_to(label, volume_label, LV_ALIGN_OUT_TOP_MID, 0, -210);
+
+
     //播放进度条
     play_slider = lv_slider_create(cont);
-    lv_obj_align(play_slider,LV_ALIGN_CENTER,0,135);//位置  
-    lv_obj_set_width(play_slider,600);//宽度
+    lv_obj_align(play_slider,LV_ALIGN_CENTER,-5,135);//位置  
+    lv_obj_set_width(play_slider,570);//宽度
     lv_obj_add_event_cb(play_slider, slider_event_cb2, LV_EVENT_RELEASED , "play");//事件    
     lv_slider_set_value(play_slider,0,LV_ANIM_OFF);//初始值
     lv_slider_set_range(play_slider, 0, 100);//范围
     //在滑条下创建标签
     time_length_label = lv_label_create(cont);
     lv_label_set_text(time_length_label, "0:00");
-    lv_obj_align_to(time_length_label, play_slider, LV_ALIGN_OUT_RIGHT_BOTTOM,0,20);
+    lv_obj_align_to(time_length_label, play_slider, LV_ALIGN_OUT_RIGHT_BOTTOM,-5,20);
     time_pos_label = lv_label_create(cont);
     lv_label_set_text(time_pos_label, "0:00");
-    lv_obj_align_to(time_pos_label, play_slider, LV_ALIGN_OUT_LEFT_BOTTOM,0,20);
+    lv_obj_align_to(time_pos_label, play_slider, LV_ALIGN_OUT_LEFT_BOTTOM,-5,20);
 }
 
 
 //列表处理函数,播放列表中的视频
 static lv_event_cb_t event_handler_video_list(lv_event_t * e)
 {
+
+
    //获取事件码
     lv_event_code_t code = lv_event_get_code(e);
     //获取事件对象,这里是按钮
@@ -1257,15 +713,24 @@ static lv_event_cb_t event_handler_video_list(lv_event_t * e)
 //显示节目单列表
 static void show_list2()
 {
+    // //创建列表文本框
+    // video_list = lv_list_create(cont);
+    // lv_obj_set_size(video_list, 120, 300);
+    // //列表位置
+    // lv_obj_align(video_list, LV_ALIGN_RIGHT_MID, 5, -60);
+    // //添加文本
+    // lv_list_add_text(video_list, "list");
+
+
     //创建列表文本框
     video_list = lv_list_create(cont);
-    //添加风格
-    // lv_obj_add_style(video_list, &font_style, 0);
-    lv_obj_set_size(video_list, 85, 300);
+    lv_obj_set_size(video_list, 120, 300);
     //列表位置
-    lv_obj_align(video_list, LV_ALIGN_RIGHT_MID, 15, -60);
+    lv_obj_align(video_list, LV_ALIGN_RIGHT_MID, 5, -60);
     //添加文本
-    lv_list_add_text(video_list, "list");
+    lv_list_add_text(video_list, "video_list");
+    
+
     //在列表中添加按钮
     lv_obj_t *btn;
     for(int i = 0; i < video_num; i++)
@@ -1274,12 +739,15 @@ static void show_list2()
         char *p = video_path[i];
         p = strrchr(p,'/');
         strcpy(tmp,++p);//裁剪
+
+
         // 参数：列表对象，图标宏，按钮名
         btn = lv_list_add_btn(video_list, NULL,strtok(tmp,"."));
         //列表按钮风格
         // lv_obj_add_style(video_list, &font_style, 0);
         // 触发事件，把下标传递
         lv_obj_add_event_cb(btn, event_handler_video_list, LV_EVENT_CLICKED, i);
+        
     }
 }
 static void k(lv_event_t *e)
@@ -1337,6 +805,7 @@ static void video_playback(lv_event_t* e) {
         perror("打开管道文件失败");
         exit(0);
     }
+
     display_interface2();
 }
 
@@ -1406,9 +875,9 @@ void Pro_BrowerCreate()
     t0 = lv_obj_create(lv_scr_act());               // 创建一个对象容器 cont
     lv_obj_set_size(t0, 800, 460);                            // 设置对象容器大小
     lv_obj_align(t0, LV_ALIGN_TOP_MID, 0, 5);                 // 设置对象容器基于屏幕中间对齐
-    lv_obj_set_style_pad_all(t0, 15, LV_PART_MAIN);           // 设置对象容器内部 item 与容器边的上下左右间距
-    lv_obj_set_style_pad_row(t0, 15, LV_PART_MAIN);           // 设置对象容器内部 item 之间的行间距
-    lv_obj_set_style_pad_column(t0, 15, LV_PART_MAIN);        // 设置对象容器内部 item 之间的列间距
+    lv_obj_set_style_pad_all(t0, 55, LV_PART_MAIN);           // 设置对象容器内部 item 与容器边的上下左右间距
+    lv_obj_set_style_pad_row(t0, 70, LV_PART_MAIN);           // 设置对象容器内部 item 之间的行间距
+    lv_obj_set_style_pad_column(t0, 30, LV_PART_MAIN);        // 设置对象容器内部 item 之间的列间距
     lv_obj_clear_flag(t0, LV_OBJ_FLAG_SCROLL_ELASTIC);            // 取消滚动条
     lv_obj_set_flex_flow(t0, LV_FLEX_FLOW_ROW_WRAP);          // 设置对象容器使用基于行的流失弹性布局flex，设置超出部分换行模式
     /**
@@ -1422,29 +891,151 @@ void Pro_BrowerCreate()
 
     
     get_video_path();//开始检索东西
-    
 
      //视频播放器的按钮
-    lv_obj_t* btn01 = lv_btn_create(t0);
-    lv_obj_set_size(btn01, 50, 150);
-    lv_obj_align(btn01, LV_ALIGN_CENTER, 0, -40);
-    lv_obj_t* label01 = lv_label_create(btn01);
-    lv_label_set_text(label01, "video");
-    lv_obj_align(btn01, LV_ALIGN_CENTER,0,-50);
-    lv_obj_center(label01);
+    lv_obj_t *btn01 = lv_btn_create(t0);
+    lv_obj_set_size(btn01,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn01,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn01,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn01,lv_palette_main(LV_PALETTE_PINK),0);
+    
+    lv_obj_t *btn01_img = lv_img_create(btn01);
+    lv_img_set_src(btn01_img,"S:/evan_work/001.png");
+    lv_obj_set_align(btn01_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn01_img,140);
+
+    app1 = lv_label_create(btn01);
+    lv_label_set_text(app1, "video");
+    lv_obj_align_to(app1, volume_slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+    
     lv_obj_add_event_cb(btn01, video_playback, LV_EVENT_RELEASED, NULL);//按键事件
 
     printf("%d\n",video_num);
 
 
-    // //音乐播放器的按钮
-    // lv_obj_t* btn02 = lv_btn_create(t0);
-    // lv_obj_align(btn02, LV_ALIGN_CENTER, 0, -40);
-    // lv_obj_t* label02 = lv_label_create(btn02);
-    // lv_label_set_text(label02, "music");
-    // lv_obj_align(btn02, LV_ALIGN_CENTER,0, 50);
-    // lv_obj_center(label02);
-    // lv_obj_add_event_cb(btn02, music_player, LV_EVENT_RELEASED, NULL);//事件
+
+
+
+    lv_obj_t *btn02 = lv_btn_create(t0);
+    lv_obj_set_size(btn02,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn02,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn02,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn02,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn02_img = lv_img_create(btn02);
+    lv_img_set_src(btn02_img,"S:/evan_work/002.png");
+    lv_obj_set_align(btn02_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn02_img,140);
+    app2 = lv_label_create(btn02);
+    lv_label_set_text(app2, "video");
+    lv_obj_align_to(app2, btn02, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+
+    lv_obj_t *btn03 = lv_btn_create(t0);
+    lv_obj_set_size(btn03,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn03,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn03,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn03,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn03_img = lv_img_create(btn03);
+    lv_img_set_src(btn03_img,"S:/evan_work/003.png");
+    lv_obj_set_align(btn03_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn03_img,140);
+    app3 = lv_label_create(btn03);
+    lv_label_set_text(app3, "video");
+    lv_obj_align_to(app3, btn03, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn04 = lv_btn_create(t0);
+    lv_obj_set_size(btn04,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn04,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn04,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn04,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn04_img = lv_img_create(btn04);
+    lv_img_set_src(btn04_img,"S:/evan_work/004.png");
+    lv_obj_set_align(btn04_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn04_img,140);
+    app4 = lv_label_create(btn04);
+    lv_label_set_text(app4, "video");
+    lv_obj_align_to(app4, btn04, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn05 = lv_btn_create(t0);
+    lv_obj_set_size(btn05,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn05,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn05,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn05,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn05_img = lv_img_create(btn05);
+    lv_img_set_src(btn05_img,"S:/evan_work/005.png");
+    lv_obj_set_align(btn05_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn05_img,140);
+    app5 = lv_label_create(btn05);
+    lv_label_set_text(app5, "video");
+    lv_obj_align_to(app5, btn05, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn06 = lv_btn_create(t0);
+    lv_obj_set_size(btn06,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn06,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn06,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn06,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn06_img = lv_img_create(btn06);
+    lv_img_set_src(btn06_img,"S:/evan_work/006.png");
+    lv_obj_set_align(btn06_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn06_img,140);
+    app6 = lv_label_create(btn06);
+    lv_label_set_text(app6, "video");
+    lv_obj_align_to(app6, btn06, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn07 = lv_btn_create(t0);
+    lv_obj_set_size(btn07,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn07,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn07,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn07,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn07_img = lv_img_create(btn07);
+    lv_img_set_src(btn07_img,"S:/evan_work/007.png");
+    lv_obj_set_align(btn07_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn07_img,140);
+    app7 = lv_label_create(btn07);
+    lv_label_set_text(app7, "video");
+    lv_obj_align_to(app7, btn07, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn08 = lv_btn_create(t0);
+    lv_obj_set_size(btn08,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn08,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn08,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn08,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn08_img = lv_img_create(btn08);
+    lv_img_set_src(btn08_img,"S:/evan_work/008.png");
+    lv_obj_set_align(btn08_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn08_img,140);
+    app8 = lv_label_create(btn08);
+    lv_label_set_text(app8, "video");
+    lv_obj_align_to(app8, btn08, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn09 = lv_btn_create(t0);
+    lv_obj_set_size(btn09,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn09,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn09,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn09,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn09_img = lv_img_create(btn09);
+    lv_img_set_src(btn09_img,"S:/evan_work/009.png");
+    lv_obj_set_align(btn09_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn09_img,140);
+    app9 = lv_label_create(btn09);
+    lv_label_set_text(app9, "video");
+    lv_obj_align_to(app9, btn09, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *btn010 = lv_btn_create(t0);
+    lv_obj_set_size(btn010,140,140);//设置按钮对象大小
+    lv_obj_clear_flag(btn010,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_border_opa(btn010,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(btn010,lv_palette_main(LV_PALETTE_PINK),0);
+    lv_obj_t *btn010_img = lv_img_create(btn010);
+    lv_img_set_src(btn010_img,"S:/evan_work/0010.png");
+    lv_obj_set_align(btn010_img,LV_ALIGN_CENTER);
+    lv_img_set_zoom(btn010_img,140);
+    app10 = lv_label_create(btn010);
+    lv_label_set_text(app10, "video");
+    lv_obj_align_to(app10, btn010, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+
+
+
 
     return 0;
 }
